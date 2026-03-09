@@ -2,7 +2,7 @@ let DATA       = null
 let CONFIG     = null
 let CONFIGURED = false
 let ACTIVE_TAB = "dashboard"
-let _pollTimer = null   // scan progress poll interval
+let _pollTimer = null
 
 const statusEl   = () => document.getElementById("status")
 const topFilters = () => document.getElementById("topFilters")
@@ -13,7 +13,7 @@ const topFilters = () => document.getElementById("topFilters")
 
 function yearBucket(y){
   const year = parseInt(y || "0", 10)
-  if (!year)       return ""
+  if (!year)        return ""
   if (year >= 2020) return "2020s"
   if (year >= 2010) return "2010s"
   if (year >= 2000) return "2000s"
@@ -24,6 +24,9 @@ function yearBucket(y){
 function pill(text){
   return `<span class="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-200">${text}</span>`
 }
+
+// Tabs that use a group-name dropdown instead of year/sort
+const GROUP_TABS = new Set(["franchises", "directors", "actors"])
 
 /* ========================================================
    API
@@ -48,7 +51,7 @@ async function loadConfig(){
 }
 
 async function loadStatus(){
-  const s  = await api("/api/config/status")
+  const s = await api("/api/config/status")
   CONFIGURED = !!s.configured
 }
 
@@ -57,7 +60,6 @@ async function loadResults(){
   const data = await api("/api/results")
 
   if (data.scanning){
-    // First-load scan was auto-started, or one was already running
     statusEl().textContent = "Scan in progress…"
     startPolling()
     return
@@ -69,24 +71,19 @@ async function loadResults(){
 }
 
 /* ========================================================
-   SCAN + PROGRESS POLLING  (FIX #8)
+   SCAN + PROGRESS POLLING
 ======================================================== */
 
 async function rescan(){
   if (!CONFIGURED){ alert("Complete setup first."); return }
-
   const res = await api("/api/scan", "POST")
-  if (!res.ok){
-    alert(res.error || "Could not start scan")
-    return
-  }
-
+  if (!res.ok){ alert(res.error || "Could not start scan"); return }
   startPolling()
 }
 
 function startPolling(){
   stopPolling()
-  renderScanProgress(null)   // show spinner immediately
+  renderScanProgress(null)
   _pollTimer = setInterval(pollScanStatus, 1500)
 }
 
@@ -96,8 +93,7 @@ function stopPolling(){
 
 async function pollScanStatus(){
   let status
-  try { status = await api("/api/scan/status") }
-  catch(e){ return }
+  try { status = await api("/api/scan/status") } catch(e){ return }
 
   renderScanProgress(status)
 
@@ -108,7 +104,6 @@ async function pollScanStatus(){
       document.getElementById("scanProgress")?.remove()
       return
     }
-    // Scan done — reload results
     const data = await api("/api/results")
     DATA = data
     statusEl().textContent = `Rescanned • ${DATA.generated_at || ""}`
@@ -134,9 +129,7 @@ function renderScanProgress(status){
     return
   }
 
-  const pct = status.step_total
-    ? Math.round((status.step_index / status.step_total) * 100)
-    : 0
+  const pct = status.step_total ? Math.round((status.step_index / status.step_total) * 100) : 0
 
   el.innerHTML = `
   <style>.spin{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style>
@@ -152,6 +145,125 @@ function renderScanProgress(status){
   </div>`
 
   statusEl().textContent = `${status.step || "Scanning…"} (${pct}%)`
+}
+
+/* ========================================================
+   TOP FILTER BAR  (FIX #3 — tab-aware)
+======================================================== */
+
+/**
+ * Rebuild the filter bar depending on which tab is active.
+ * - GROUP_TABS (franchises/directors/actors): show a name-picker dropdown + sort
+ * - Flat tabs (classics/suggestions/wishlist/...): show year filter + sort
+ * - dashboard / config / metadata tabs: hide entirely
+ */
+function updateFilterBar(){
+  const bar = topFilters()
+
+  const hiddenTabs = new Set(["dashboard","config","notmdb","nomatch"])
+  if (hiddenTabs.has(ACTIVE_TAB)){
+    bar.style.display = "none"
+    return
+  }
+
+  bar.style.display = "flex"
+
+  if (GROUP_TABS.has(ACTIVE_TAB)){
+    // Preserve whatever the user has already selected before rebuilding
+    const prevGroup = document.getElementById("groupFilter")?.value || ""
+    const prevSort  = document.getElementById("sort")?.value || "popularity"
+
+    const groups = getGroupsForTab(ACTIVE_TAB).filter(g => (g.missing || []).length > 0)
+    const options = groups.map(g => {
+      const name = g.name || ""
+      const sel  = name === prevGroup ? " selected" : ""
+      return `<option value="${name}"${sel}>${name}</option>`
+    }).join("")
+
+    bar.innerHTML = `
+      <select id="groupFilter"
+        class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2 min-w-[220px] max-w-xs">
+        <option value="">All ${ACTIVE_TAB}</option>
+        ${options}
+      </select>
+      <select id="sort" class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+        <option value="popularity"${prevSort==="popularity"?" selected":""}>Sort: popularity</option>
+        <option value="rating"${prevSort==="rating"?" selected":""}>Sort: rating</option>
+        <option value="votes"${prevSort==="votes"?" selected":""}>Sort: votes</option>
+        <option value="year"${prevSort==="year"?" selected":""}>Sort: year</option>
+        <option value="title"${prevSort==="title"?" selected":""}>Sort: title</option>
+      </select>`
+  } else {
+    const prevSearch = document.getElementById("search")?.value || ""
+    const prevYear   = document.getElementById("yearFilter")?.value || ""
+    const prevSort   = document.getElementById("sort")?.value || "popularity"
+
+    bar.innerHTML = `
+      <input id="search" class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2 w-80"
+             placeholder="Search title..." value="${prevSearch}"/>
+      <select id="yearFilter" class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+        <option value=""${prevYear===""?" selected":""}>All years</option>
+        <option value="2020s"${prevYear==="2020s"?" selected":""}>2020s</option>
+        <option value="2010s"${prevYear==="2010s"?" selected":""}>2010s</option>
+        <option value="2000s"${prevYear==="2000s"?" selected":""}>2000s</option>
+        <option value="1990s"${prevYear==="1990s"?" selected":""}>1990s</option>
+        <option value="older"${prevYear==="older"?" selected":""}>Older</option>
+      </select>
+      <select id="sort" class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+        <option value="popularity"${prevSort==="popularity"?" selected":""}>Sort: popularity</option>
+        <option value="rating"${prevSort==="rating"?" selected":""}>Sort: rating</option>
+        <option value="votes"${prevSort==="votes"?" selected":""}>Sort: votes</option>
+        <option value="year"${prevSort==="year"?" selected":""}>Sort: year</option>
+        <option value="title"${prevSort==="title"?" selected":""}>Sort: title</option>
+      </select>`
+  }
+}
+
+function getGroupsForTab(tab){
+  if (tab === "franchises") return DATA.franchises || []
+  if (tab === "directors")  return DATA.directors  || []
+  if (tab === "actors")     return DATA.actors      || []
+  return []
+}
+
+function getGroupFilter(){
+  return document.getElementById("groupFilter")?.value || ""
+}
+
+/* ========================================================
+   FILTERS / SORT
+======================================================== */
+
+function getFilters(){
+  return {
+    search: (document.getElementById("search")?.value || "").toLowerCase().trim(),
+    year:   document.getElementById("yearFilter")?.value || "",
+    sort:   document.getElementById("sort")?.value || "popularity",
+  }
+}
+
+function applyFilters(list, groupName = ""){
+  const { search, year, sort } = getFilters()
+
+  let out = list.filter(m => {
+    if (search){
+      const inTitle = (m.title || "").toLowerCase().includes(search)
+      const inGroup = groupName.toLowerCase().includes(search)
+      if (!inTitle && !inGroup) return false
+    }
+    if (year && yearBucket(m.year) !== year) return false
+    return true
+  })
+
+  out.sort((a, b) => {
+    if (sort === "title")  return (a.title  || "").localeCompare(b.title  || "")
+    if (sort === "year")   return parseInt(b.year   || 0) - parseInt(a.year   || 0)
+    if (sort === "rating") return (b.rating || 0) - (a.rating || 0)
+    if (sort === "votes")  return (b.votes  || 0) - (a.votes  || 0)
+    return (b.popularity || 0) - (a.popularity || 0)
+  })
+
+  return out
 }
 
 /* ========================================================
@@ -225,46 +337,6 @@ async function addToRadarr(tmdb, title, btn){
 }
 
 /* ========================================================
-   FILTERS / SORT  (FIX #7 — actually used now)
-======================================================== */
-
-function getFilters(){
-  return {
-    search: (document.getElementById("search")?.value || "").toLowerCase().trim(),
-    year:   document.getElementById("yearFilter")?.value || "",
-    sort:   document.getElementById("sort")?.value || "popularity",
-  }
-}
-
-/**
- * Filter and sort a flat list of movie objects.
- * Pass groupName to also match against a group label (director/actor/franchise name).
- */
-function applyFilters(list, groupName = ""){
-  const { search, year, sort } = getFilters()
-
-  let out = list.filter(m => {
-    if (search){
-      const inTitle = (m.title || "").toLowerCase().includes(search)
-      const inGroup = groupName.toLowerCase().includes(search)
-      if (!inTitle && !inGroup) return false
-    }
-    if (year && yearBucket(m.year) !== year) return false
-    return true
-  })
-
-  out.sort((a, b) => {
-    if (sort === "title")  return (a.title  || "").localeCompare(b.title  || "")
-    if (sort === "year")   return parseInt(b.year   || 0) - parseInt(a.year   || 0)
-    if (sort === "rating") return (b.rating || 0) - (a.rating || 0)
-    if (sort === "votes")  return (b.votes  || 0) - (a.votes  || 0)
-    return (b.popularity || 0) - (a.popularity || 0)
-  })
-
-  return out
-}
-
-/* ========================================================
    CHART REGISTRY
 ======================================================== */
 
@@ -293,9 +365,9 @@ function renderDashboard(){
   const s = DATA.scores || {}
   const p = DATA.plex   || {}
 
+  // FIX #1: always read from DATA._ignored_franchises which is kept in sync
   const ignoredFranchises = new Set(DATA._ignored_franchises || [])
 
-  // Franchise breakdown
   let fComplete = 0, fMissingOne = 0, fMissingMore = 0
   ;(DATA.franchises || []).filter(f => !ignoredFranchises.has(f.name)).forEach(f => {
     const n = (f.missing || []).length
@@ -304,17 +376,14 @@ function renderDashboard(){
     else              fMissingMore++
   })
 
-  // Classics
   const classicsMiss  = (DATA.classics || []).length
   const classicsTotal = Math.round(classicsMiss / (1 - (s.classics_proxy_pct || 0) / 100)) || classicsMiss
   const classicsHave  = Math.max(0, classicsTotal - classicsMiss)
 
-  // Metadata health
   const noGuid   = p.no_tmdb_guid || 0
   const noMatch  = (DATA.tmdb_not_found || []).length
   const okMovies = Math.max(0, (p.indexed_tmdb || 0) - noMatch)
 
-  // Director missing buckets
   const dBuckets = { "0": 0, "1–2": 0, "3–5": 0, "6–10": 0, "10+": 0 }
   ;(DATA.directors || []).forEach(d => {
     const n = (d.missing || []).length
@@ -327,11 +396,11 @@ function renderDashboard(){
 
   const topActors = (DATA.charts?.top_actors || []).slice(0, 10)
 
-  const card  = inner => `<div style="background:#18181b;border:1px solid #27272a;border-radius:10px;padding:1.25rem">${inner}</div>`
-  const sec   = t     => `<div style="font-size:.65rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#71717a;margin-bottom:.9rem">${t}</div>`
-  const dot   = col   => `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col};margin-right:7px;flex-shrink:0"></span>`
-  const leg   = (col, label, val) => `<div style="display:flex;align-items:center;margin-bottom:5px;font-size:.78rem">${dot(col)}<span style="color:#a1a1aa;flex:1">${label}</span><b>${val}</b></div>`
-  const srow  = (label, val, col = "") => `<div style="display:flex;justify-content:space-between;padding:.38rem 0;border-bottom:1px solid #27272a;font-size:.84rem"><span style="color:#a1a1aa">${label}</span><b ${col ? `style="color:${col}"` : ""}>${val}</b></div>`
+  const card = inner => `<div style="background:#18181b;border:1px solid #27272a;border-radius:10px;padding:1.25rem">${inner}</div>`
+  const sec  = t     => `<div style="font-size:.65rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#71717a;margin-bottom:.9rem">${t}</div>`
+  const dot  = col   => `<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${col};margin-right:7px;flex-shrink:0"></span>`
+  const leg  = (col, label, val) => `<div style="display:flex;align-items:center;margin-bottom:5px;font-size:.78rem">${dot(col)}<span style="color:#a1a1aa;flex:1">${label}</span><b>${val}</b></div>`
+  const srow = (label, val, col = "") => `<div style="display:flex;justify-content:space-between;padding:.38rem 0;border-bottom:1px solid #27272a;font-size:.84rem"><span style="color:#a1a1aa">${label}</span><b ${col ? `style="color:${col}"` : ""}>${val}</b></div>`
 
   c.innerHTML = `
   <style>
@@ -381,7 +450,7 @@ function renderDashboard(){
       ${srow("Shorts skipped",     p.skipped_short ?? 0)}
       ${srow("No TMDB GUID",       noGuid,  noGuid  ? "#f59e0b" : "")}
       ${srow("TMDB no match",      noMatch, noMatch ? "#ef4444" : "")}
-      ${srow("Franchises tracked", (DATA.franchises || []).length)}
+      ${srow("Franchises tracked", (DATA.franchises || []).filter(f => !ignoredFranchises.has(f.name)).length)}
       ${srow("Directors tracked",  (DATA.directors  || []).length)}
       ${srow("Wishlist",           (DATA.wishlist   || []).length)}
     `)}
@@ -393,10 +462,7 @@ function renderDashboard(){
 
     const doughnut = (labels, data, colors) => ({
       type: "doughnut",
-      data: {
-        labels,
-        datasets: [{ data, backgroundColor: colors, borderColor: "#18181b", borderWidth: 3, hoverOffset: 8 }],
-      },
+      data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: "#18181b", borderWidth: 3, hoverOffset: 8 }] },
       options: {
         cutout: "62%",
         animation: { duration: 700 },
@@ -408,20 +474,17 @@ function renderDashboard(){
     })
 
     destroyChart("franchise")
-    registerChart("franchise", new Chart(
-      document.getElementById("chartFranchise"),
+    registerChart("franchise", new Chart(document.getElementById("chartFranchise"),
       doughnut(["Complete","Missing 1","Missing 2+"], [fComplete,fMissingOne,fMissingMore], ["#22c55e","#f59e0b","#ef4444"])
     ))
 
     destroyChart("classics")
-    registerChart("classics", new Chart(
-      document.getElementById("chartClassics"),
-      doughnut(["In library","Missing"], [classicsHave, classicsMiss], ["#a855f7","#3f3f46"])
+    registerChart("classics", new Chart(document.getElementById("chartClassics"),
+      doughnut(["In library","Missing"], [classicsHave,classicsMiss], ["#a855f7","#3f3f46"])
     ))
 
     destroyChart("meta")
-    registerChart("meta", new Chart(
-      document.getElementById("chartMeta"),
+    registerChart("meta", new Chart(document.getElementById("chartMeta"),
       doughnut(["Valid TMDB","No GUID","No Match"], [okMovies,noGuid,noMatch], ["#22c55e","#f59e0b","#ef4444"])
     ))
 
@@ -430,15 +493,10 @@ function renderDashboard(){
       type: "bar",
       data: {
         labels:   topActors.map(a => a.name),
-        datasets: [{
-          data:            topActors.map(a => a.count),
-          backgroundColor: topActors.map((_, i) => `hsl(${210 + i * 8},70%,${55 - i * 2}%)`),
-          borderRadius: 4, borderSkipped: false,
-        }],
+        datasets: [{ data: topActors.map(a => a.count), backgroundColor: topActors.map((_,i) => `hsl(${210+i*8},70%,${55-i*2}%)`), borderRadius: 4, borderSkipped: false }],
       },
       options: {
-        indexAxis: "y",
-        animation: { duration: 700 },
+        indexAxis: "y", animation: { duration: 700 },
         scales: {
           x: { grid: { color: "#27272a" }, ticks: { color: "#71717a", font: { size: 11 } } },
           y: { grid: { display: false },   ticks: { color: "#d4d4d8", font: { size: 11 } } },
@@ -452,11 +510,7 @@ function renderDashboard(){
       type: "bar",
       data: {
         labels:   Object.keys(dBuckets),
-        datasets: [{
-          data:            Object.values(dBuckets),
-          backgroundColor: ["#3f3f46","#3b82f6","#f59e0b","#ef4444","#7f1d1d"],
-          borderRadius: 4, borderSkipped: false,
-        }],
+        datasets: [{ data: Object.values(dBuckets), backgroundColor: ["#3f3f46","#3b82f6","#f59e0b","#ef4444","#7f1d1d"], borderRadius: 4, borderSkipped: false }],
       },
       options: {
         animation: { duration: 700 },
@@ -464,29 +518,40 @@ function renderDashboard(){
           x: { grid: { display: false }, ticks: { color: "#d4d4d8", font: { size: 11 } } },
           y: { grid: { color: "#27272a" }, ticks: { color: "#71717a", font: { size: 11 } } },
         },
-        plugins: {
-          legend:  { display: false },
-          tooltip: { callbacks: { title: ctx => `Missing: ${ctx[0].label} films` } },
-        },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { title: ctx => `Missing: ${ctx[0].label} films` } } },
       },
     }))
   })
 }
 
 /* ========================================================
-   GROUPED LIST RENDERER  (shared by directors / actors / franchises)
-   FIX #7 — filters now applied
+   GROUPED LIST RENDERER  (franchises / directors / actors)
+   FIX #3 — uses groupFilter dropdown instead of year/search
 ======================================================== */
 
-function renderGroupedList({ groups, nameKey, nameIcon, ignoreKind, ignoreHandler, emptyMsg }){
-  const c = document.getElementById("content")
-  const { search } = getFilters()
+function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg }){
+  const c          = document.getElementById("content")
+  const groupFilter = getGroupFilter()   // selected name from dropdown, or "" for all
+  const sort        = document.getElementById("sort")?.value || "popularity"
+
   let html = ""
 
   groups.forEach(g => {
-    const name    = g[nameKey] || ""
-    const filtered = applyFilters(g.missing || [], name)
-    if (!filtered.length) return
+    const name = g[nameKey] || ""
+
+    // If a specific group is selected, skip all others
+    if (groupFilter && name !== groupFilter) return
+
+    // Sort the missing list by selected sort
+    const sorted = [...(g.missing || [])].sort((a, b) => {
+      if (sort === "title")  return (a.title  || "").localeCompare(b.title  || "")
+      if (sort === "year")   return parseInt(b.year   || 0) - parseInt(a.year   || 0)
+      if (sort === "rating") return (b.rating || 0) - (a.rating || 0)
+      if (sort === "votes")  return (b.votes  || 0) - (a.votes  || 0)
+      return (b.popularity || 0) - (a.popularity || 0)
+    })
+
+    if (!sorted.length) return
 
     html += `
     <div class="mb-6">
@@ -498,7 +563,7 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreKind, ignoreHandle
           class="text-xs px-2 py-1 rounded bg-zinc-700 hover:bg-red-700 text-zinc-300">Ignore</button>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        ${filtered.map(movieCard).join("")}
+        ${sorted.map(movieCard).join("")}
       </div>
     </div>`
   })
@@ -515,7 +580,6 @@ function renderFranchises(){
     groups:        DATA.franchises || [],
     nameKey:       "name",
     nameIcon:      "🎬",
-    ignoreKind:    "franchise",
     ignoreHandler: "ignoreFranchise",
     emptyMsg:      "No missing franchise movies 🎉",
   })
@@ -523,7 +587,15 @@ function renderFranchises(){
 
 async function ignoreFranchise(name, btn){
   await api("/api/ignore", "POST", { kind: "franchise", value: name })
+
+  // FIX #1: update DATA in memory immediately so dashboard chart reflects change
+  if (!DATA._ignored_franchises) DATA._ignored_franchises = []
+  if (!DATA._ignored_franchises.includes(name)) DATA._ignored_franchises.push(name)
+
   btn.closest(".mb-6").remove()
+
+  // Rebuild the group dropdown to remove the ignored franchise
+  updateFilterBar()
 }
 
 /* ========================================================
@@ -535,7 +607,6 @@ function renderDirectors(){
     groups:        DATA.directors || [],
     nameKey:       "name",
     nameIcon:      "🎬",
-    ignoreKind:    "director",
     ignoreHandler: "ignoreDirector",
     emptyMsg:      "No missing director films found.",
   })
@@ -543,7 +614,10 @@ function renderDirectors(){
 
 async function ignoreDirector(name, btn){
   await api("/api/ignore", "POST", { kind: "director", value: name })
+  // Remove from DATA so the dropdown and list update immediately
+  DATA.directors = (DATA.directors || []).filter(d => d.name !== name)
   btn.closest(".mb-6").remove()
+  updateFilterBar()
 }
 
 /* ========================================================
@@ -555,7 +629,6 @@ function renderActors(){
     groups:        DATA.actors || [],
     nameKey:       "name",
     nameIcon:      "🎭",
-    ignoreKind:    "actor",
     ignoreHandler: "ignoreActor",
     emptyMsg:      "No actor suggestions found.",
   })
@@ -563,21 +636,20 @@ function renderActors(){
 
 async function ignoreActor(name, btn){
   await api("/api/ignore", "POST", { kind: "actor", value: name })
+  DATA.actors = (DATA.actors || []).filter(a => a.name !== name)
   btn.closest(".mb-6").remove()
+  updateFilterBar()
 }
 
 /* ========================================================
-   CLASSICS  (FIX #7)
+   CLASSICS
 ======================================================== */
 
 function renderClassics(){
   const c    = document.getElementById("content")
   const list = applyFilters(DATA.classics || [])
 
-  if (!list.length){
-    c.innerHTML = `<div class="text-zinc-400">No missing classics found 🎉</div>`
-    return
-  }
+  if (!list.length){ c.innerHTML = `<div class="text-zinc-400">No missing classics found 🎉</div>`; return }
 
   c.innerHTML = `
   <div class="mb-3 text-zinc-400 text-sm">${list.length} classic films missing from your library</div>
@@ -585,17 +657,14 @@ function renderClassics(){
 }
 
 /* ========================================================
-   SUGGESTIONS  (FIX #7)
+   SUGGESTIONS
 ======================================================== */
 
 function renderSuggestions(){
   const c    = document.getElementById("content")
   const list = applyFilters(DATA.suggestions || [])
 
-  if (!list.length){
-    c.innerHTML = `<div class="text-zinc-400">No TMDB suggestions available.</div>`
-    return
-  }
+  if (!list.length){ c.innerHTML = `<div class="text-zinc-400">No TMDB suggestions available.</div>`; return }
 
   c.innerHTML = `
   <div class="mb-3 text-zinc-400 text-sm">${list.length} suggestions from TMDB Top Rated</div>
@@ -603,7 +672,7 @@ function renderSuggestions(){
 }
 
 /* ========================================================
-   NO TMDB GUID  (FIX #7 — search by title)
+   NO TMDB GUID
 ======================================================== */
 
 function renderNoTmdb(){
@@ -612,10 +681,7 @@ function renderNoTmdb(){
   let list = DATA.no_tmdb_guid || []
   if (search) list = list.filter(m => (m.title || "").toLowerCase().includes(search))
 
-  if (!list.length){
-    c.innerHTML = `<div class="text-zinc-400">All movies have a TMDB GUID 🎉</div>`
-    return
-  }
+  if (!list.length){ c.innerHTML = `<div class="text-zinc-400">All movies have a TMDB GUID 🎉</div>`; return }
 
   c.innerHTML = `
   <div class="mb-3 text-zinc-400 text-sm">${list.length} movies without a TMDB GUID — fix via Plex → Fix Match → TheMovieDB</div>
@@ -636,10 +702,7 @@ function renderNoMatch(){
   const c    = document.getElementById("content")
   const list = DATA.tmdb_not_found || []
 
-  if (!list.length){
-    c.innerHTML = `<div class="text-zinc-400">All TMDB matches resolved 🎉</div>`
-    return
-  }
+  if (!list.length){ c.innerHTML = `<div class="text-zinc-400">All TMDB matches resolved 🎉</div>`; return }
 
   c.innerHTML = `
   <div class="mb-3 text-zinc-400 text-sm">${list.length} movies with invalid TMDB metadata — refresh metadata or fix match in Plex</div>
@@ -649,7 +712,7 @@ function renderNoMatch(){
 }
 
 /* ========================================================
-   WISHLIST  (FIX #7)
+   WISHLIST
 ======================================================== */
 
 function renderWishlist(){
@@ -662,17 +725,17 @@ function renderWishlist(){
 }
 
 /* ========================================================
-   CONFIG  (FIX #9 — advanced settings exposed)
+   CONFIG
 ======================================================== */
 
 function renderConfig(){
-  const c      = document.getElementById("content")
-  const cfg     = CONFIG || {}
-  const plex    = cfg.PLEX       || {}
-  const tmdb    = cfg.TMDB       || {}
-  const radarr  = cfg.RADARR     || {}
-  const cls     = cfg.CLASSICS   || {}
-  const act     = cfg.ACTOR_HITS || {}
+  const c     = document.getElementById("content")
+  const cfg   = CONFIG || {}
+  const plex  = cfg.PLEX       || {}
+  const tmdb  = cfg.TMDB       || {}
+  const radarr = cfg.RADARR    || {}
+  const cls   = cfg.CLASSICS   || {}
+  const act   = cfg.ACTOR_HITS || {}
 
   const field = (id, label, value, type = "text") => `
   <label class="block text-sm text-zinc-400">${label}
@@ -683,51 +746,42 @@ function renderConfig(){
 
   c.innerHTML = `
   <div class="max-w-xl space-y-6">
-
-    <!-- PLEX -->
     <div class="bg-zinc-900 border border-zinc-800 rounded p-4 space-y-3">
       <div class="font-semibold text-zinc-200">Plex</div>
-      ${field("cfg_plex_url",   "Plex URL",      plex.PLEX_URL    || "")}
-      ${field("cfg_plex_token", "Plex Token",    plex.PLEX_TOKEN  || "")}
-      ${field("cfg_library",    "Library Name",  plex.LIBRARY_NAME || "")}
+      ${field("cfg_plex_url",   "Plex URL",     plex.PLEX_URL     || "")}
+      ${field("cfg_plex_token", "Plex Token",   plex.PLEX_TOKEN   || "")}
+      ${field("cfg_library",    "Library Name", plex.LIBRARY_NAME || "")}
     </div>
-
-    <!-- TMDB -->
     <div class="bg-zinc-900 border border-zinc-800 rounded p-4 space-y-3">
       <div class="font-semibold text-zinc-200">TMDB</div>
       ${field("cfg_tmdb_key", "TMDB API Key", tmdb.TMDB_API_KEY || "")}
     </div>
-
-    <!-- ADVANCED -->
     <details class="bg-zinc-900 border border-zinc-800 rounded p-4">
       <summary class="font-semibold text-zinc-200 cursor-pointer select-none">Advanced settings</summary>
       <div class="space-y-3 mt-3">
         <div class="text-xs uppercase tracking-wide text-zinc-500 pt-1">Classics</div>
-        ${field("cfg_classics_pages",    "Pages to fetch (TMDB Top Rated)",  cls.CLASSICS_PAGES       ?? 4,    "number")}
-        ${field("cfg_classics_votes",    "Minimum votes",                    cls.CLASSICS_MIN_VOTES   ?? 5000, "number")}
-        ${field("cfg_classics_rating",   "Minimum rating",                   cls.CLASSICS_MIN_RATING  ?? 8.0,  "number")}
-        ${field("cfg_classics_max",      "Max results",                      cls.CLASSICS_MAX_RESULTS ?? 120,  "number")}
+        ${field("cfg_classics_pages",  "Pages to fetch (TMDB Top Rated)", cls.CLASSICS_PAGES       ?? 4,    "number")}
+        ${field("cfg_classics_votes",  "Minimum votes",                   cls.CLASSICS_MIN_VOTES   ?? 5000, "number")}
+        ${field("cfg_classics_rating", "Minimum rating",                  cls.CLASSICS_MIN_RATING  ?? 8.0,  "number")}
+        ${field("cfg_classics_max",    "Max results",                     cls.CLASSICS_MAX_RESULTS ?? 120,  "number")}
         <div class="text-xs uppercase tracking-wide text-zinc-500 pt-2">Actors</div>
-        ${field("cfg_actor_votes",       "Minimum votes per film",           act.ACTOR_MIN_VOTES             ?? 500, "number")}
-        ${field("cfg_actor_max",         "Max results per actor",            act.ACTOR_MAX_RESULTS_PER_ACTOR ?? 10,  "number")}
+        ${field("cfg_actor_votes", "Minimum votes per film",    act.ACTOR_MIN_VOTES             ?? 500, "number")}
+        ${field("cfg_actor_max",   "Max results per actor",     act.ACTOR_MAX_RESULTS_PER_ACTOR ?? 10,  "number")}
         <div class="text-xs uppercase tracking-wide text-zinc-500 pt-2">Plex scanner</div>
-        ${field("cfg_plex_page_size",    "Page size",                        plex.PLEX_PAGE_SIZE    ?? 500, "number")}
-        ${field("cfg_short_limit",       "Short movie limit (minutes)",      plex.SHORT_MOVIE_LIMIT ?? 60,  "number")}
+        ${field("cfg_plex_page_size", "Page size",                    plex.PLEX_PAGE_SIZE    ?? 500, "number")}
+        ${field("cfg_short_limit",    "Short movie limit (minutes)",  plex.SHORT_MOVIE_LIMIT ?? 60,  "number")}
       </div>
     </details>
-
-    <!-- RADARR -->
     <div class="bg-zinc-900 border border-zinc-800 rounded p-4 space-y-3">
       <div class="font-semibold text-zinc-200">Radarr <span class="text-xs font-normal text-zinc-400">(optional)</span></div>
       <label class="flex items-center gap-2 text-sm text-zinc-400">
         <input type="checkbox" id="cfg_radarr_enabled" ${radarr.RADARR_ENABLED ? "checked" : ""}/> Enabled
       </label>
-      ${field("cfg_radarr_url",     "Radarr URL",        radarr.RADARR_URL             || "")}
-      ${field("cfg_radarr_key",     "Radarr API Key",    radarr.RADARR_API_KEY         || "")}
-      ${field("cfg_radarr_root",    "Root Folder Path",  radarr.RADARR_ROOT_FOLDER_PATH || "")}
-      ${field("cfg_radarr_quality", "Quality Profile ID",radarr.RADARR_QUALITY_PROFILE_ID ?? 6, "number")}
+      ${field("cfg_radarr_url",     "Radarr URL",         radarr.RADARR_URL              || "")}
+      ${field("cfg_radarr_key",     "Radarr API Key",     radarr.RADARR_API_KEY          || "")}
+      ${field("cfg_radarr_root",    "Root Folder Path",   radarr.RADARR_ROOT_FOLDER_PATH || "")}
+      ${field("cfg_radarr_quality", "Quality Profile ID", radarr.RADARR_QUALITY_PROFILE_ID ?? 6, "number")}
     </div>
-
     <button onclick="saveConfig()"
       class="w-full px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-black font-semibold">
       Save Configuration
@@ -738,7 +792,7 @@ function renderConfig(){
 
 async function saveConfig(){
   const v  = id => document.getElementById(id)?.value?.trim() ?? ""
-  const vi = id => parseInt(v(id)) || 0
+  const vi = id => parseInt(v(id))   || 0
   const vf = id => parseFloat(v(id)) || 0
 
   const payload = {
@@ -749,9 +803,7 @@ async function saveConfig(){
       PLEX_PAGE_SIZE:    vi("cfg_plex_page_size"),
       SHORT_MOVIE_LIMIT: vi("cfg_short_limit"),
     },
-    TMDB: {
-      TMDB_API_KEY: v("cfg_tmdb_key"),
-    },
+    TMDB:  { TMDB_API_KEY: v("cfg_tmdb_key") },
     CLASSICS: {
       CLASSICS_PAGES:       vi("cfg_classics_pages"),
       CLASSICS_MIN_VOTES:   vi("cfg_classics_votes"),
@@ -792,7 +844,7 @@ function render(){
     return renderConfig()
   }
 
-  topFilters().style.display = "flex"
+  updateFilterBar()   // rebuild filter bar for current tab
 
   if (ACTIVE_TAB === "dashboard")   return renderDashboard()
   if (ACTIVE_TAB === "franchises")  return renderFranchises()
@@ -823,9 +875,13 @@ document.addEventListener("click", e => {
   setActiveTab(btn.dataset.tab)
 })
 
-// Live re-render when filters change
-document.addEventListener("input",  e => { if (["search","yearFilter","sort"].includes(e.target.id)) render() })
-document.addEventListener("change", e => { if (["yearFilter","sort"].includes(e.target.id)) render() })
+// Live re-render when any filter control changes
+document.addEventListener("input",  e => {
+  if (["search","groupFilter","sort"].includes(e.target.id)) render()
+})
+document.addEventListener("change", e => {
+  if (["yearFilter","groupFilter","sort"].includes(e.target.id)) render()
+})
 
 /* ========================================================
    BOOT
@@ -834,7 +890,6 @@ document.addEventListener("change", e => { if (["yearFilter","sort"].includes(e.
 async function boot(){
   await loadConfig()
   await loadStatus()
-
   if (CONFIGURED) await loadResults()
   else { statusEl().textContent = "Setup required"; render() }
 }

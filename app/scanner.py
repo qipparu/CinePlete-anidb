@@ -8,7 +8,7 @@ from collections import Counter
 from app.config import load_config
 from app.plex_xml import scan_movies
 from app.tmdb import TMDB
-from app.overrides import load_json
+from app.overrides import load_json, save_json, remove_value
 
 DATA_DIR = "/app/data"
 RESULTS_FILE = f"{DATA_DIR}/results.json"
@@ -237,7 +237,6 @@ def build():
     log.info(f"Directors analyzed: {len(directors)}")
 
     # ---- CLASSICS ---------------------------------------------
-    # (no separate step — folded into actors step for UX simplicity)
     classics = []
     suggestions = []
 
@@ -290,7 +289,6 @@ def build():
 
         pid = sr["results"][0]["id"]
 
-        # FIX #1 — guard against None credits (was crashing before)
         credits = tmdb.person_credits(pid)
         if not credits:
             continue
@@ -335,6 +333,18 @@ def build():
     log.info(f"Actors analyzed: {len(actors)}")
 
     # ---- WISHLIST ---------------------------------------------
+    # FIX #2: auto-remove wishlist movies that are now in the library
+    cleaned = False
+    for mid in list(wishlist_movies):
+        if mid in plex_ids:
+            log.info(f"Wishlist auto-cleanup: tmdb {mid} is now in library, removing")
+            remove_value(overrides["wishlist_movies"], mid)
+            wishlist_movies.discard(mid)
+            cleaned = True
+
+    if cleaned:
+        save_json(OVERRIDES_FILE, overrides)
+
     wishlist = []
     for mid in sorted(wishlist_movies):
         md = get_movie(mid)
