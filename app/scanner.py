@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, date
 from collections import Counter
 
 from app.config import load_config
@@ -157,6 +157,9 @@ def build():
             pid = int(pid)
             if pid in plex_ids or pid in ignore_movies:
                 continue
+            release = (p.get("release_date") or "")[:10]
+            if not release or release > date.today().isoformat():
+                continue
             missing.append({
                 "title":      p.get("title"),
                 "tmdb":       pid,
@@ -212,6 +215,9 @@ def build():
                 continue
             mid = int(mid)
             if mid in plex_ids or mid in ignore_movies:
+                continue
+            release = (m.get("release_date") or "")[:10]
+            if not release or release > date.today().isoformat():
                 continue
             missing.append({
                 "title":      m.get("title"),
@@ -311,6 +317,9 @@ def build():
         for m in films:
             mid = int(m.get("id"))
             if mid in plex_ids or mid in ignore_movies:
+                continue
+            release = (m.get("release_date") or "")[:10]
+            if not release or release > date.today().isoformat():
                 continue
             missing.append({
                 "title":      m.get("title"),
