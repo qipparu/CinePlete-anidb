@@ -118,7 +118,7 @@ def build():
     for mid in plex_ids:
         md = get_movie(mid)
         if not md:
-            tmdb_not_found.append({"tmdb": mid})
+            tmdb_not_found.append({"tmdb": mid, "title": plex_ids[mid]})
 
     # ---- COLLECTIONS ------------------------------------------
     _set_step(3)

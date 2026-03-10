@@ -760,7 +760,8 @@ function renderNoMatch(){
       ${list.map(m=>`
       <div class="meta-item">
         <span class="tag tag-red" style="flex-shrink:0">NO MATCH</span>
-        <span class="meta-item-title">${tag(`tmdb:${m.tmdb}`)}</span>
+        <span class="meta-item-title">${m.title || "Unknown title"}</span>
+        <span class="meta-item-year">${tag(`tmdb:${m.tmdb}`)}</span>
       </div>`).join("")}
     </div>`
 }

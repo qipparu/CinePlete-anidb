@@ -46,7 +46,7 @@ def scan_movies():
 
     key = library_key()
 
-    plex_ids = set()
+    plex_ids = {}          # {tmdb_id: plex_title}  — dict so we keep the title
     directors = defaultdict(set)
     actors = defaultdict(set)
     no_tmdb_guid = []
@@ -103,7 +103,8 @@ def scan_movies():
                 })
                 continue
 
-            plex_ids.add(tmdb_id)
+            # Store title alongside tmdb_id so we can show it if TMDB lookup fails
+            plex_ids[tmdb_id] = title
 
             for d in v.findall("Director"):
                 tag = d.attrib.get("tag")
