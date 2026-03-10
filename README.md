@@ -5,7 +5,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/sdblepas/cineplete)](https://hub.docker.com/r/sdblepas/cineplete)
 [![Docker Image Version](https://img.shields.io/docker/v/sdblepas/cineplete/latest)](https://hub.docker.com/r/sdblepas/cineplete)
 ![Python](https://img.shields.io/badge/python-3.11-green)
-![License](https://img.shields.io/badge/license-MIT-lightgrey)
+![License](https://img.shields.io/github/license/sdblepas/CinePlete)
 ![Plex](https://img.shields.io/badge/Plex-compatible-orange)
 ![TMDB](https://img.shields.io/badge/TMDB-API-blue)
 
