@@ -1,6 +1,5 @@
 import os
 import json
-import logging
 import threading
 from datetime import datetime, date
 from collections import Counter
@@ -9,16 +8,13 @@ from app.config import load_config
 from app.plex_xml import scan_movies
 from app.tmdb import TMDB
 from app.overrides import load_json, save_json, remove_value
+from app.logger import get_logger
 
 DATA_DIR = "/data"
 RESULTS_FILE = f"{DATA_DIR}/results.json"
 OVERRIDES_FILE = f"{DATA_DIR}/overrides.json"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [SCANNER] %(message)s"
-)
-log = logging.getLogger()
+log = get_logger(__name__)
 
 # --------------------------------------------------
 # Scan state — shared with web.py for progress API
@@ -92,7 +88,16 @@ def build():
     tmdb_api_key                = tmdb_cfg.get("TMDB_API_KEY")
 
     if not tmdb_api_key:
+        log.error("TMDB_API_KEY is missing from config — scan cannot continue")
         raise RuntimeError("TMDB_API_KEY missing in config")
+
+    # Quick sanity check — validate the API key before running the full scan
+    log.debug("Validating TMDB API key...")
+    test = TMDB(tmdb_api_key)
+    if not test.movie(603):   # The Matrix — reliable test target
+        log.error("TMDB API key validation failed — all movie lookups will return empty. "
+                  "Check your TMDB_API_KEY in config.")
+        raise RuntimeError("TMDB API key invalid or unreachable")
 
     os.makedirs(DATA_DIR, exist_ok=True)
 

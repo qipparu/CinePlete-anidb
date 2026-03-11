@@ -923,6 +923,48 @@ function render(){
   if (ACTIVE_TAB==="nomatch")     return renderNoMatch()
   if (ACTIVE_TAB==="wishlist")    return renderWishlist()
   if (ACTIVE_TAB==="config")      return renderConfig()
+  if (ACTIVE_TAB==="logs")        return renderLogs()
+}
+
+/* ============================================================
+   LOGS
+============================================================ */
+
+async function renderLogs(){
+  const c = document.getElementById("content")
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+      <p style="color:var(--text3);font-size:.78rem">Last 200 lines of <code style="color:var(--gold)">/data/cineplete.log</code></p>
+      <button onclick="renderLogs()" style="font-size:.65rem;padding:3px 10px;border-radius:5px;border:1px solid var(--border2);background:var(--bg3);color:var(--text2);cursor:pointer;font-family:'DM Mono',monospace">↻ Refresh</button>
+    </div>
+    <div id="log-box" style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1rem;font-family:'DM Mono',monospace;font-size:.72rem;line-height:1.7;overflow-x:auto;max-height:75vh;overflow-y:auto">
+      <span style="color:var(--text3)">Loading...</span>
+    </div>`
+
+  try {
+    const res  = await fetch("/api/logs?lines=200")
+    const data = await res.json()
+    const box  = document.getElementById("log-box")
+
+    box.innerHTML = data.lines.map(line => {
+      let color = "var(--text2)"
+      if (line.includes("[ERROR   ]"))   color = "var(--red)"
+      else if (line.includes("[WARNING ]")) color = "var(--amber)"
+      else if (line.includes("[DEBUG   ]")) color = "var(--text3)"
+      else if (line.includes("[INFO    ]")) color = "var(--text)"
+      return `<div style="color:${color};white-space:pre-wrap;word-break:break-all">${escHtml(line)}</div>`
+    }).join("")
+
+    // Auto-scroll to bottom
+    box.scrollTop = box.scrollHeight
+  } catch(e) {
+    document.getElementById("log-box").innerHTML =
+      `<span style="color:var(--red)">Failed to fetch logs: ${e.message}</span>`
+  }
+}
+
+function escHtml(str){
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
 }
 
 /* ============================================================
