@@ -1,20 +1,23 @@
 import os
 import json
 import requests
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
 from app.config import load_config, save_config, is_configured
 from app.scanner import build, build_async, scan_state
 from app.overrides import load_json, save_json, add_unique, remove_value
+from app.logger import get_logger
 
-DATA_DIR = "/data"
-RESULTS_FILE = f"{DATA_DIR}/results.json"
+DATA_DIR       = "/data"
+RESULTS_FILE   = f"{DATA_DIR}/results.json"
 OVERRIDES_FILE = f"{DATA_DIR}/overrides.json"
+LOG_FILE       = f"{DATA_DIR}/cineplete.log"
 
 APP_VERSION = os.getenv("APP_VERSION", "dev")
 
+log = get_logger(__name__)
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="/app/static"), name="static")
 
@@ -244,3 +247,22 @@ def radarr_add(payload: dict = Body(...)):
         return {"ok": False, "error": r.text}
 
     return {"ok": True}
+
+
+# --------------------------------------------------
+# Logs
+# --------------------------------------------------
+
+@app.get("/api/logs")
+def api_logs(lines: int = Query(default=200, le=500)):
+    """Return the last N lines of cineplete.log."""
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            all_lines = f.readlines()
+        tail = all_lines[-lines:]
+        return {"lines": [l.rstrip() for l in tail]}
+    except FileNotFoundError:
+        return {"lines": ["No log file yet — run a scan first."]}
+    except Exception as e:
+        log.error(f"Could not read log file: {e}")
+        return {"lines": [f"Error reading log file: {e}"]}
