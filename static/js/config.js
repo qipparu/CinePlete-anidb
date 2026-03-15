@@ -51,6 +51,19 @@ async function clearCache(){
   else toast("Failed to clear cache: " + res.error,"error")
 }
 
+function toggleSecret(id){
+  const input = document.getElementById(id)
+  const eye   = document.getElementById(id+"-eye")
+  if (!input) return
+  if (input.type === "password"){
+    input.type = "text"
+    if (eye) eye.innerHTML = `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>`
+  } else {
+    input.type = "password"
+    if (eye) eye.innerHTML = `<path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>`
+  }
+}
+
 function renderConfig(){
   const c     = document.getElementById("content")
   const cfg   = CONFIG||{}
@@ -62,11 +75,31 @@ function renderConfig(){
   const auto  = cfg.AUTOMATION  ||{}
   const tg    = cfg.TELEGRAM    ||{}
 
-  const field = (id, label, value, type="text") => `
+  const field = (id, label, value, type="text") => {
+    const isSecret = type === "secret"
+    const inputType = isSecret ? "password" : type
+    const toggle = isSecret ? `
+      <button type="button" onclick="toggleSecret('${id}')"
+        style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
+               background:none;border:none;cursor:pointer;color:var(--text3);
+               display:flex;align-items:center;padding:2px"
+        title="Show/hide">
+        <svg id="${id}-eye" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
+          <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      </button>` : ""
+    return `
   <div class="form-group">
     <label class="form-label" for="${id}">${label}</label>
-    <input class="form-input" id="${id}" type="${type}" value="${value??""}" />
+    <div style="position:relative">
+      <input class="form-input" id="${id}" type="${inputType}" value="${value??""}"
+        style="${isSecret?"padding-right:2.2rem":""}"/>
+      ${toggle}
+    </div>
   </div>`
+  }
 
   const check = (id, label, checked) => `
   <div class="form-group" style="display:flex;align-items:center;gap:.6rem">
@@ -87,13 +120,13 @@ function renderConfig(){
       <div class="form-section">
         ${sec("Plex")}
         ${field("cfg_plex_url",   "Plex URL",     plex.PLEX_URL    ||"")}
-        ${field("cfg_plex_token", "Plex Token",   plex.PLEX_TOKEN  ||"")}
+        ${field("cfg_plex_token", "Plex Token",   plex.PLEX_TOKEN  ||"", "secret")}
         ${field("cfg_library",    "Library Name", plex.LIBRARY_NAME||"")}
       </div>
 
       <div class="form-section">
         ${sec("TMDB")}
-        ${field("cfg_tmdb_key","TMDB API Key", tmdb.TMDB_API_KEY||"")}
+        ${field("cfg_tmdb_key","TMDB API Key", tmdb.TMDB_API_KEY||"", "secret")}
       </div>
 
       <details class="form-section">
@@ -126,7 +159,7 @@ function renderConfig(){
         ${sec('Radarr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_radarr_enabled", "Enabled", radarr.RADARR_ENABLED)}
         ${field("cfg_radarr_url",     "Radarr URL",         radarr.RADARR_URL              ||"")}
-        ${field("cfg_radarr_key",     "Radarr API Key",     radarr.RADARR_API_KEY          ||"")}
+        ${field("cfg_radarr_key",     "Radarr API Key",     radarr.RADARR_API_KEY          ||"", "secret")}
         ${field("cfg_radarr_root",    "Root Folder Path",   radarr.RADARR_ROOT_FOLDER_PATH ||"")}
         ${field("cfg_radarr_quality", "Quality Profile ID", radarr.RADARR_QUALITY_PROFILE_ID??6,"number")}
         ${check("cfg_radarr_search",  "Search &amp; download on add", radarr.RADARR_SEARCH_ON_ADD)}
@@ -135,7 +168,7 @@ function renderConfig(){
       <div class="form-section">
         ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_tg_enabled", "Enabled", tg.TELEGRAM_ENABLED)}
-        ${field("cfg_tg_token",   "Bot Token",  tg.TELEGRAM_BOT_TOKEN||"")}
+        ${field("cfg_tg_token",   "Bot Token",  tg.TELEGRAM_BOT_TOKEN||"", "secret")}
         ${field("cfg_tg_chat",    "Chat ID",    tg.TELEGRAM_CHAT_ID  ||"")}
         ${field("cfg_tg_interval","Min interval between notifications (min)", tg.TELEGRAM_MIN_INTERVAL??30,"number")}
         ${hint("Get your Bot Token from @BotFather and Chat ID from @userinfobot.")}
