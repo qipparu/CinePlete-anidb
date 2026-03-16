@@ -3,6 +3,7 @@
 ============================================================ */
 
 const GROUP_TABS = new Set(["franchises","directors","actors"])
+let _activeGroupFilter = ""
 
 function yearBucket(y){
   const yr = parseInt(y||"0",10)
@@ -18,13 +19,12 @@ function tag(text, cls=""){
   return `<span class="tag ${cls}">${text}</span>`
 }
 
-function getGroupFilter(){
-  return document.getElementById("groupFilterSearch")?.dataset.selected || ""
-}
+function getGroupFilter(){ return _activeGroupFilter }
 
 function clearGroupFilter(){
+  _activeGroupFilter = ""
   const inp = document.getElementById("groupFilterSearch")
-  if (inp){ inp.value = ""; inp.dataset.selected = "" }
+  if (inp) inp.value = ""
   const clr = document.getElementById("groupFilterClear")
   if (clr) clr.style.display = "none"
   render()
@@ -37,8 +37,7 @@ function _initGroupFilter(groups){
   if (!inp || !drop) return
 
   // Restore previous selection display
-  const sel = inp.dataset.selected || ""
-  if (sel) inp.value = sel
+  if (_activeGroupFilter) inp.value = _activeGroupFilter
 
   function showDropdown(filter){
     const f = (filter||"").toLowerCase()
@@ -61,8 +60,8 @@ function _initGroupFilter(groups){
       el.addEventListener("mousedown", e => {
         e.preventDefault()
         const name = el.dataset.name
+        _activeGroupFilter = name
         inp.value = name
-        inp.dataset.selected = name
         drop.style.display = "none"
         if (clr) clr.style.display = ""
         render()
@@ -71,7 +70,7 @@ function _initGroupFilter(groups){
   }
 
   inp.addEventListener("input", () => {
-    inp.dataset.selected = ""
+    _activeGroupFilter = ""
     if (clr) clr.style.display = inp.value ? "" : "none"
     showDropdown(inp.value)
   })
@@ -123,7 +122,7 @@ function updateFilterBar(){
   bar.style.display="flex"
 
   if (GROUP_TABS.has(ACTIVE_TAB)){
-    const prevGroup = document.getElementById("groupFilterSearch")?.value || ""
+    const prevGroup = _activeGroupFilter
     const prevSort  = document.getElementById("sort")?.value || "popularity"
     const groups = getGroupsForTab(ACTIVE_TAB)
       .filter(g=>(g.missing||[]).length>0)

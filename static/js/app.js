@@ -68,6 +68,7 @@ function setNavActive(tab){
 function setActiveTab(tab){
   ACTIVE_TAB = tab
   setNavActive(tab)
+  if (typeof _activeGroupFilter !== "undefined") _activeGroupFilter = ""
   // Default sort for suggestions is matches, everything else is popularity
   const sortEl = document.getElementById("sort")
   if (sortEl){
