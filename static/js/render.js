@@ -461,14 +461,19 @@ async function renderLogs(){
     const res  = await fetch("/api/logs?lines=200")
     const data = await res.json()
     const box  = document.getElementById("log-box")
-    box.innerHTML = data.lines.map(line => {
+    // Build log lines safely using textContent to prevent XSS
+    box.innerHTML = ""
+    data.lines.forEach(line => {
       let color = "var(--text2)"
       if (line.includes("[ERROR   ]"))    color = "var(--red)"
       else if (line.includes("[WARNING ]")) color = "var(--amber)"
       else if (line.includes("[DEBUG   ]")) color = "var(--text3)"
       else if (line.includes("[INFO    ]")) color = "var(--text)"
-      return `<div style="color:${color};white-space:pre-wrap;word-break:break-all">${escHtml(line)}</div>`
-    }).join("")
+      const div = document.createElement("div")
+      div.style.cssText = `color:${color};white-space:pre-wrap;word-break:break-all`
+      div.textContent = line   // textContent never parses HTML — safe against XSS
+      box.appendChild(div)
+    })
     box.scrollTop = box.scrollHeight
   } catch(e) {
     document.getElementById("log-box").innerHTML =
