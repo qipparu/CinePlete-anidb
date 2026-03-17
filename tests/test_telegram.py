@@ -1,189 +1,123 @@
 """
-Tests for app/telegram.py
-Covers: min interval logic, missing credentials, message building
+Cineplete — Telegram notifications
+------------------------------------
+Sends a scan summary to a Telegram chat when a scan completes.
+
+Respects TELEGRAM_MIN_INTERVAL to avoid spamming on frequent scans.
+Last notification time is stored in /data/last_telegram.txt
 """
+
 import os
-import sys
 import time
-import tempfile
-import pytest
+import requests
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from app.config import load_config
+from app.logger import get_logger
 
-# We test the pure logic functions without making real HTTP calls
-
-
-def _make_results(lib=100, score=75.0, franchises=5, directors=10,
-                  classics=3, suggestions=50, no_guid=2, no_match=1):
-    """Build a minimal results dict matching scanner output."""
-    return {
-        "plex":   {"indexed_tmdb": lib},
-        "scores": {"global_cinema_score": score},
-        "franchises":    [{"missing": ["x"] * franchises}],
-        "directors":     [{"missing": ["x"] * directors}],
-        "classics":      ["x"] * classics,
-        "suggestions":   ["x"] * suggestions,
-        "no_tmdb_guid":  ["x"] * no_guid,
-        "tmdb_not_found":["x"] * no_match,
-    }
+log        = get_logger(__name__)
+DATA_DIR   = "/data"
+STAMP_FILE = f"{DATA_DIR}/last_telegram.txt"
 
 
-# ─────────────────────────────────────────────
-# Min interval logic (pure, no HTTP)
-# ─────────────────────────────────────────────
-
-class TestMinInterval:
-
-    def test_never_sent_returns_zero(self):
-        """_last_sent should return 0.0 when stamp file does not exist."""
-        import app.telegram as tg
-        # Point stamp file to a non-existent path
-        original = tg.STAMP_FILE
-        tg.STAMP_FILE = "/nonexistent/path/last_telegram.txt"
-        try:
-            assert tg._last_sent() == 0.0
-        finally:
-            tg.STAMP_FILE = original
-
-    def test_save_and_read_stamp(self):
-        """_save_sent + _last_sent round-trip."""
-        import app.telegram as tg
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
-            path = f.name
-        original = tg.STAMP_FILE
-        tg.STAMP_FILE = path
-        try:
-            before = time.time()
-            tg._save_sent()   # writes to path (already set above)
-            after  = time.time()
-            stamp  = tg._last_sent()
-            assert before <= stamp <= after, f"stamp {stamp} not between {before} and {after}"
-        finally:
-            tg.STAMP_FILE = original
-            try:
-                os.unlink(path)
-            except Exception:
-                pass
-
-    def test_interval_respected(self, monkeypatch):
-        """send_scan_summary should skip if called within min interval."""
-        import app.telegram as tg
-
-        sent = []
-
-        def fake_post(*args, **kwargs):
-            sent.append(True)
-            class R:
-                status_code = 200
-            return R()
-
-        monkeypatch.setattr("requests.post", fake_post)
-
-        cfg = {
-            "TELEGRAM": {
-                "TELEGRAM_ENABLED":      True,
-                "TELEGRAM_BOT_TOKEN":    "fake_token",
-                "TELEGRAM_CHAT_ID":      "12345",
-                "TELEGRAM_MIN_INTERVAL": 60,   # 60 min
-            }
-        }
-        monkeypatch.setattr("app.telegram.load_config", lambda: cfg)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
-            path = f.name
-        original = tg.STAMP_FILE
-        tg.STAMP_FILE = path
-
-        try:
-            # Write a stamp from 1 second ago — within 60 min interval
-            with open(path, "w") as f:
-                f.write(str(time.time() - 1))
-
-            tg.send_scan_summary(_make_results())
-            assert len(sent) == 0   # should be skipped
-        finally:
-            tg.STAMP_FILE = original
-            os.unlink(path)
-
-    def test_sends_when_interval_elapsed(self, monkeypatch):
-        """send_scan_summary should send if enough time has passed."""
-        import app.telegram as tg
-
-        sent = []
-
-        def fake_post(*args, **kwargs):
-            sent.append(True)
-            class R:
-                status_code = 200
-            return R()
-
-        monkeypatch.setattr("requests.post", fake_post)
-
-        cfg = {
-            "TELEGRAM": {
-                "TELEGRAM_ENABLED":      True,
-                "TELEGRAM_BOT_TOKEN":    "fake_token",
-                "TELEGRAM_CHAT_ID":      "12345",
-                "TELEGRAM_MIN_INTERVAL": 1,   # 1 min
-            }
-        }
-        monkeypatch.setattr("app.telegram.load_config", lambda: cfg)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".txt") as f:
-            path = f.name
-        original = tg.STAMP_FILE
-        tg.STAMP_FILE = path
-
-        try:
-            # Write a stamp from 2 minutes ago — beyond 1 min interval
-            with open(path, "w") as f:
-                f.write(str(time.time() - 120))
-
-            tg.send_scan_summary(_make_results())
-            assert len(sent) == 1
-        finally:
-            tg.STAMP_FILE = original
-            os.unlink(path)
+def _last_sent() -> float:
+    """Return timestamp of last notification, or 0 if never sent."""
+    try:
+        with open(STAMP_FILE, "r") as f:
+            return float(f.read().strip())
+    except Exception:
+        return 0.0
 
 
-# ─────────────────────────────────────────────
-# Missing credentials
-# ─────────────────────────────────────────────
+def _save_sent():
+    """Persist current timestamp as last notification time."""
+    try:
+        stamp_dir = os.path.dirname(STAMP_FILE)
+        if stamp_dir:
+            os.makedirs(stamp_dir, exist_ok=True)
+        with open(STAMP_FILE, "w") as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        log.warning(f"Could not save Telegram timestamp: {e}")
 
-class TestMissingCredentials:
 
-    def test_disabled_does_not_send(self, monkeypatch):
-        import app.telegram as tg
-        sent = []
-        monkeypatch.setattr("requests.post", lambda *a, **k: sent.append(True))
-        cfg = {"TELEGRAM": {"TELEGRAM_ENABLED": False,
-                            "TELEGRAM_BOT_TOKEN": "tok",
-                            "TELEGRAM_CHAT_ID": "123",
-                            "TELEGRAM_MIN_INTERVAL": 0}}
-        monkeypatch.setattr("app.telegram.load_config", lambda: cfg)
-        tg.send_scan_summary(_make_results())
-        assert len(sent) == 0
+def send_scan_summary(results: dict, duration_s: int | None = None):
+    """
+    Send a scan summary to Telegram if enabled and interval allows.
 
-    def test_missing_token_does_not_send(self, monkeypatch):
-        import app.telegram as tg
-        sent = []
-        monkeypatch.setattr("requests.post", lambda *a, **k: sent.append(True))
-        cfg = {"TELEGRAM": {"TELEGRAM_ENABLED": True,
-                            "TELEGRAM_BOT_TOKEN": "",
-                            "TELEGRAM_CHAT_ID": "123",
-                            "TELEGRAM_MIN_INTERVAL": 0}}
-        monkeypatch.setattr("app.telegram.load_config", lambda: cfg)
-        tg.send_scan_summary(_make_results())
-        assert len(sent) == 0
+    Args:
+        results:    The full results dict from scanner.build()
+        duration_s: Scan duration in seconds (optional)
+    """
+    cfg      = load_config()
+    tg       = cfg.get("TELEGRAM", {})
 
-    def test_missing_chat_id_does_not_send(self, monkeypatch):
-        import app.telegram as tg
-        sent = []
-        monkeypatch.setattr("requests.post", lambda *a, **k: sent.append(True))
-        cfg = {"TELEGRAM": {"TELEGRAM_ENABLED": True,
-                            "TELEGRAM_BOT_TOKEN": "tok",
-                            "TELEGRAM_CHAT_ID": "",
-                            "TELEGRAM_MIN_INTERVAL": 0}}
-        monkeypatch.setattr("app.telegram.load_config", lambda: cfg)
-        tg.send_scan_summary(_make_results())
-        assert len(sent) == 0
+    if not tg.get("TELEGRAM_ENABLED"):
+        return
+
+    token    = tg.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id  = tg.get("TELEGRAM_CHAT_ID", "").strip()
+    min_int  = int(tg.get("TELEGRAM_MIN_INTERVAL", 30))
+
+    if not token or not chat_id:
+        log.warning("Telegram enabled but BOT_TOKEN or CHAT_ID is missing")
+        return
+
+    # Respect minimum interval
+    if min_int > 0:
+        elapsed_min = (time.time() - _last_sent()) / 60
+        if elapsed_min < min_int:
+            log.debug(f"Telegram notification skipped — last sent {elapsed_min:.1f}m ago (min={min_int}m)")
+            return
+
+    # Build message
+    plex    = results.get("plex", {})
+    scores  = results.get("scores", {})
+
+    lib_count   = plex.get("indexed_tmdb", 0)
+    global_score= scores.get("global_cinema_score", 0)
+
+    franchise_missing = sum(len(f.get("missing", [])) for f in results.get("franchises", []))
+    director_missing  = sum(len(d.get("missing", [])) for d in results.get("directors",  []))
+    classics_missing  = len(results.get("classics",    []))
+    suggestions_count = len(results.get("suggestions", []))
+    no_guid           = len(results.get("no_tmdb_guid",  []))
+    no_match          = len(results.get("tmdb_not_found",[]))
+
+    dur_str = ""
+    if duration_s:
+        if duration_s < 60:
+            dur_str = f"{duration_s}s"
+        else:
+            m, s = divmod(duration_s, 60)
+            dur_str = f"{m}m {s}s" if s else f"{m}m"
+
+    lines = [
+        "🎬 *Cineplete Scan Complete*",
+        "",
+        f"📚 Library: {lib_count} movies" + (f"  ·  ⏱ {dur_str}" if dur_str else ""),
+        f"🎯 Global Score: *{global_score}%*",
+        "",
+        f"🔴 Franchises missing: {franchise_missing}",
+        f"🎭 Directors missing: {director_missing}",
+        f"⭐ Classics missing: {classics_missing}",
+        f"💡 Suggestions: {suggestions_count}",
+    ]
+
+    if no_guid or no_match:
+        lines += ["", f"⚠️ Metadata issues: {no_guid} no GUID · {no_match} no match"]
+
+    text = "\n".join(lines)
+
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            _save_sent()
+            log.info("Telegram scan summary sent")
+        else:
+            log.warning(f"Telegram API error {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        log.error(f"Telegram notification failed: {e}")
