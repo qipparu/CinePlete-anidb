@@ -33,7 +33,10 @@ def _setup():
         return
     _configured = True
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+    except Exception:
+        pass
 
     fmt = logging.Formatter(
         fmt="%(asctime)s [%(levelname)-8s] %(name)s — %(message)s",
@@ -60,8 +63,8 @@ def _setup():
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(fmt)
         root.addHandler(fh)
-    except Exception as e:
-        root.warning(f"Could not open log file {LOG_FILE}: {e}")
+    except Exception:
+        pass  # console-only logging in environments without /data
 
     # Silence noisy third-party loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

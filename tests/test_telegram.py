@@ -54,13 +54,16 @@ class TestMinInterval:
         tg.STAMP_FILE = path
         try:
             before = time.time()
-            tg._save_sent()
+            tg._save_sent()   # writes to path (already set above)
             after  = time.time()
             stamp  = tg._last_sent()
-            assert before <= stamp <= after
+            assert before <= stamp <= after, f"stamp {stamp} not between {before} and {after}"
         finally:
             tg.STAMP_FILE = original
-            os.unlink(path)
+            try:
+                os.unlink(path)
+            except Exception:
+                pass
 
     def test_interval_respected(self, monkeypatch):
         """send_scan_summary should skip if called within min interval."""
