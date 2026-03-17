@@ -1,6 +1,6 @@
 """
 Tests for app/config.py
-Covers: _deep_merge, is_configured
+Covers: _deep_merge, is_configured, new config sections
 """
 import copy
 import pytest
@@ -21,7 +21,7 @@ class TestDeepMerge:
         override = {"A": {"x": 99}}
         result   = _deep_merge(base, override)
         assert result["A"]["x"] == 99
-        assert result["A"]["y"] == 2          # untouched
+        assert result["A"]["y"] == 2
 
     def test_adds_missing_key(self):
         base     = {"A": {"x": 1}}
@@ -48,7 +48,6 @@ class TestDeepMerge:
         assert result["A"]["B"]["C"] == 42
 
     def test_scalar_override_replaces_dict(self):
-        """If override provides a scalar where base had a dict, scalar wins."""
         base     = {"A": {"x": 1}}
         override = {"A": "flat"}
         result   = _deep_merge(base, override)
@@ -58,7 +57,7 @@ class TestDeepMerge:
         partial = {"PLEX": {"PLEX_URL": "http://plex:32400"}}
         result  = _deep_merge(DEFAULT_CONFIG, partial)
         assert result["PLEX"]["PLEX_URL"] == "http://plex:32400"
-        assert DEFAULT_CONFIG["PLEX"]["PLEX_URL"] == ""   # original untouched
+        assert DEFAULT_CONFIG["PLEX"]["PLEX_URL"] == ""
 
 
 # ─────────────────────────────────────────────
@@ -69,10 +68,10 @@ class TestIsConfigured:
 
     def _cfg(self, url="", token="", library="", api_key=""):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
-        cfg["PLEX"]["PLEX_URL"]      = url
-        cfg["PLEX"]["PLEX_TOKEN"]    = token
-        cfg["PLEX"]["LIBRARY_NAME"]  = library
-        cfg["TMDB"]["TMDB_API_KEY"]  = api_key
+        cfg["PLEX"]["PLEX_URL"]     = url
+        cfg["PLEX"]["PLEX_TOKEN"]   = token
+        cfg["PLEX"]["LIBRARY_NAME"] = library
+        cfg["TMDB"]["TMDB_API_KEY"] = api_key
         return cfg
 
     def test_all_fields_set_returns_true(self):
@@ -101,3 +100,52 @@ class TestIsConfigured:
 
     def test_default_config_not_configured(self):
         assert is_configured(copy.deepcopy(DEFAULT_CONFIG)) is False
+
+
+# ─────────────────────────────────────────────
+# New config sections present in DEFAULT_CONFIG
+# ─────────────────────────────────────────────
+
+class TestDefaultConfigSections:
+
+    def test_automation_section_exists(self):
+        assert "AUTOMATION" in DEFAULT_CONFIG
+
+    def test_automation_poll_interval_default(self):
+        assert DEFAULT_CONFIG["AUTOMATION"]["LIBRARY_POLL_INTERVAL"] == 30
+
+    def test_telegram_section_exists(self):
+        assert "TELEGRAM" in DEFAULT_CONFIG
+
+    def test_telegram_enabled_default_false(self):
+        assert DEFAULT_CONFIG["TELEGRAM"]["TELEGRAM_ENABLED"] is False
+
+    def test_telegram_min_interval_default(self):
+        assert DEFAULT_CONFIG["TELEGRAM"]["TELEGRAM_MIN_INTERVAL"] == 30
+
+    def test_telegram_token_default_empty(self):
+        assert DEFAULT_CONFIG["TELEGRAM"]["TELEGRAM_BOT_TOKEN"] == ""
+
+    def test_telegram_chat_id_default_empty(self):
+        assert DEFAULT_CONFIG["TELEGRAM"]["TELEGRAM_CHAT_ID"] == ""
+
+    def test_tmdb_workers_default(self):
+        assert DEFAULT_CONFIG["TMDB"]["TMDB_WORKERS"] == 6
+
+    def test_radarr_search_on_add_default_false(self):
+        assert DEFAULT_CONFIG["RADARR"]["RADARR_SEARCH_ON_ADD"] is False
+
+    def test_suggestions_section_exists(self):
+        assert "SUGGESTIONS" in DEFAULT_CONFIG
+
+    def test_suggestions_defaults(self):
+        assert DEFAULT_CONFIG["SUGGESTIONS"]["SUGGESTIONS_MAX_RESULTS"] == 100
+        assert DEFAULT_CONFIG["SUGGESTIONS"]["SUGGESTIONS_MIN_SCORE"] == 2
+
+    def test_deep_merge_preserves_new_sections(self):
+        """Partial override should not wipe out new sections."""
+        partial = {"PLEX": {"PLEX_URL": "http://plex:32400"}}
+        result  = _deep_merge(DEFAULT_CONFIG, partial)
+        assert "AUTOMATION"  in result
+        assert "TELEGRAM"    in result
+        assert "SUGGESTIONS" in result

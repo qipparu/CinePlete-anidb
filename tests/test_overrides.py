@@ -1,6 +1,6 @@
 """
 Tests for app/overrides.py
-Covers: add_unique, remove_value, load_json (default fallback)
+Covers: add_unique, remove_value, load_json, rec_fetched_ids default
 """
 import json
 import os
@@ -53,7 +53,7 @@ class TestRemoveValue:
 
     def test_no_error_on_missing_value(self):
         lst = [1, 2, 3]
-        remove_value(lst, 99)   # should not raise
+        remove_value(lst, 99)
         assert lst == [1, 2, 3]
 
     def test_removes_string(self):
@@ -90,7 +90,7 @@ class TestLoadJson:
             os.unlink(path)
 
     def test_fills_missing_keys_with_defaults(self):
-        data = {"ignore_movies": [1]}   # missing other keys
+        data = {"ignore_movies": [1]}
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(data, f)
             path = f.name
@@ -110,3 +110,48 @@ class TestLoadJson:
             assert result == DEFAULT
         finally:
             os.unlink(path)
+
+
+# ─────────────────────────────────────────────
+# DEFAULT keys
+# ─────────────────────────────────────────────
+
+class TestDefaultKeys:
+
+    def test_rec_fetched_ids_in_default(self):
+        assert "rec_fetched_ids" in DEFAULT
+
+    def test_rec_fetched_ids_default_empty_list(self):
+        assert DEFAULT["rec_fetched_ids"] == []
+
+    def test_rec_fetched_ids_populated_on_load(self):
+        """A file without rec_fetched_ids should get it added as empty list."""
+        data = {"ignore_movies": [1]}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            path = f.name
+        try:
+            result = load_json(path)
+            assert "rec_fetched_ids" in result
+            assert result["rec_fetched_ids"] == []
+        finally:
+            os.unlink(path)
+
+    def test_rec_fetched_ids_preserved_on_load(self):
+        """Existing rec_fetched_ids should be preserved."""
+        data = {"rec_fetched_ids": [100, 200, 300]}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            path = f.name
+        try:
+            result = load_json(path)
+            assert result["rec_fetched_ids"] == [100, 200, 300]
+        finally:
+            os.unlink(path)
+
+    def test_all_default_keys_present(self):
+        expected = {
+            "ignore_movies", "ignore_franchises", "ignore_directors",
+            "ignore_actors", "wishlist_movies", "rec_fetched_ids"
+        }
+        assert expected == set(DEFAULT.keys())
