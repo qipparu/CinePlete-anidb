@@ -83,10 +83,12 @@ function renderConfig(){
   const jf    = cfg.JELLYFIN    ||{}
   const srv   = cfg.SERVER      ||{}
 
+  const mediaServer = (srv.MEDIA_SERVER || "plex").toLowerCase()
+
   const field = (id, label, value, type="text") => {
-    const isSecret = type === "secret"
+    const isSecret  = type === "secret"
     const inputType = isSecret ? "password" : type
-    const toggle = isSecret ? `
+    const toggle    = isSecret ? `
       <button type="button" onclick="toggleSecret('${id}')"
         style="position:absolute;right:.6rem;top:50%;transform:translateY(-50%);
                background:none;border:none;cursor:pointer;color:var(--text3);
@@ -116,9 +118,9 @@ function renderConfig(){
     <label for="${id}" class="form-label" style="margin:0;cursor:pointer">${label}</label>
   </div>`
 
-  const sec   = t => `<div class="form-section-title">${t}</div>`
-  const sub   = t => `<p style="font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin:1rem 0 .75rem">${t}</p>`
-  const hint  = t => `<p style="font-size:.68rem;color:var(--text3);margin-top:-.25rem;margin-bottom:.5rem">${t}</p>`
+  const sec  = t => `<div class="form-section-title">${t}</div>`
+  const sub  = t => `<p style="font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin:1rem 0 .75rem">${t}</p>`
+  const hint = t => `<p style="font-size:.68rem;color:var(--text3);margin-top:-.25rem;margin-bottom:.5rem">${t}</p>`
 
   c.innerHTML = `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start">
@@ -126,10 +128,27 @@ function renderConfig(){
     <!-- LEFT COLUMN -->
     <div>
       <div class="form-section">
-        ${sec("Plex")}
-        ${field("cfg_plex_url",   "Plex URL",     plex.PLEX_URL    ||"")}
-        ${field("cfg_plex_token", "Plex Token",   plex.PLEX_TOKEN  ||"", "secret")}
-        ${field("cfg_library",    "Library Name", plex.LIBRARY_NAME||"")}
+        ${sec("Media Server")}
+        <div class="form-group">
+          <label class="form-label">Server Type</label>
+          <select id="cfg_media_server" onchange="toggleMediaServer()"
+            style="width:100%;background:var(--bg3);border:1px solid var(--border2);
+                   border-radius:8px;color:var(--text);font-family:'DM Mono',monospace;
+                   font-size:.82rem;padding:.55rem .85rem;outline:none">
+            <option value="plex"     ${mediaServer==="plex"     ?"selected":""}>Plex</option>
+            <option value="jellyfin" ${mediaServer==="jellyfin" ?"selected":""}>Jellyfin</option>
+          </select>
+        </div>
+        <div id="plex-fields" style="display:${mediaServer==="plex"?"block":"none"}">
+          ${field("cfg_plex_url",   "Plex URL",     plex.PLEX_URL    ||"")}
+          ${field("cfg_plex_token", "Plex Token",   plex.PLEX_TOKEN  ||"", "secret")}
+          ${field("cfg_library",    "Library Name", plex.LIBRARY_NAME||"")}
+        </div>
+        <div id="jellyfin-fields" style="display:${mediaServer==="jellyfin"?"block":"none"}">
+          ${field("cfg_jf_url",     "Jellyfin URL",  jf.JELLYFIN_URL          ||"")}
+          ${field("cfg_jf_key",     "API Key",        jf.JELLYFIN_API_KEY      ||"", "secret")}
+          ${field("cfg_jf_library", "Library Name",   jf.JELLYFIN_LIBRARY_NAME ||"Movies")}
+        </div>
       </div>
 
       <div class="form-section">
@@ -154,7 +173,7 @@ function renderConfig(){
           ${sub("TMDB")}
           ${field("cfg_tmdb_workers","Concurrent workers (1–10)", tmdb.TMDB_WORKERS??6,"number")}
           ${hint("Higher = faster first scan. Default 6, max 10.")}
-          ${sub("Plex Scanner")}
+          ${sub("Scanner")}
           ${field("cfg_plex_page_size","Page size",               plex.PLEX_PAGE_SIZE   ??500, "number")}
           ${field("cfg_short_limit",  "Short movie limit (min)", plex.SHORT_MOVIE_LIMIT??60,  "number")}
         </div>
@@ -185,7 +204,7 @@ function renderConfig(){
       <div class="form-section">
         ${sec("Automation")}
         ${field("cfg_poll_interval","Library poll interval (min, 0 = disabled)", auto.LIBRARY_POLL_INTERVAL??30,"number")}
-        ${hint("Auto-scans when your Plex library size changes.")}
+        ${hint("Auto-scans when your media server library size changes.")}
       </div>
 
       <div class="form-section" id="cache-section">
