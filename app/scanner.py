@@ -111,14 +111,16 @@ def build():
     rec_fetched_ids   = set(overrides.get("rec_fetched_ids", []))
 
     # ---- MEDIA SERVER SCAN ------------------------------------
-    _set_step(1)
     media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
     if media_server == "jellyfin":
         from app.jellyfin_api import scan_movies
+        STEPS[1] = "Scanning Jellyfin library"
         log.info("Using Jellyfin scanner")
     else:
         from app.plex_xml import scan_movies
+        STEPS[1] = "Scanning Plex library"
         log.info("Using Plex scanner")
+    _set_step(1)
     plex_ids, directors_map, actors_map, plex_stats, no_tmdb_guid = scan_movies()
     log.info(f"Plex movies detected: {len(plex_ids)}")
 

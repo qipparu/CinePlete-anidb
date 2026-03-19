@@ -113,6 +113,9 @@ def scan_movies():
             media_ids[tmdb_id] = title
 
             # People — directors and actors are in the same array
+            # Limit actors to top 15 per film to match Plex behavior
+            # (Jellyfin returns ALL people including minor roles)
+            actor_count = 0
             for person in item.get("People", []):
                 name      = person.get("Name", "").strip()
                 role_type = person.get("Type", "")
@@ -120,8 +123,9 @@ def scan_movies():
                     continue
                 if role_type == "Director":
                     directors[name].add(tmdb_id)
-                elif role_type == "Actor":
+                elif role_type == "Actor" and actor_count < 15:
                     actors[name].add(tmdb_id)
+                    actor_count += 1
 
         total = data.get("TotalRecordCount", 0)
         start += len(items)

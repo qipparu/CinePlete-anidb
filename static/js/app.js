@@ -27,7 +27,7 @@ const PAGE_TITLES = {
 ============================================================ */
 
 function render(){
-  if (!DATA && !["config"].includes(ACTIVE_TAB)){
+  if (!DATA && !["config","logs"].includes(ACTIVE_TAB)){
     renderSkeleton()
     return
   }
@@ -53,7 +53,7 @@ function render(){
   if (ACTIVE_TAB==="nomatch")     return renderNoMatch()
   if (ACTIVE_TAB==="wishlist")    return renderWishlist()
   if (ACTIVE_TAB==="config")      return renderConfig()
-  if (ACTIVE_TAB==="logs")        return renderLogs()
+  if (ACTIVE_TAB==="logs")        return renderLogs()  // async — self-contained
 }
 
 /* ============================================================
