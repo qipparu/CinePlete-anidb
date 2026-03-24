@@ -63,6 +63,20 @@ DEFAULT_CONFIG = {
         "RADARR_MONITORED": True,
         "RADARR_SEARCH_ON_ADD": False,
     },
+    "OVERSEERR": {
+        "OVERSEERR_ENABLED": False,
+        "OVERSEERR_URL": "",
+        "OVERSEERR_API_KEY": "",
+    },
+    "JELLYSEERR": {
+        "JELLYSEERR_ENABLED": False,
+        "JELLYSEERR_URL": "",
+        "JELLYSEERR_API_KEY": "",
+    },
+    "WEBHOOK": {
+        "WEBHOOK_ENABLED": False,
+        "WEBHOOK_SECRET": "",
+    },
 }
 
 

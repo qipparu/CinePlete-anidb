@@ -103,8 +103,18 @@ async function openMovieModal(tmdb, fallback = {}) {
       </div>
     </div>` : ""
 
+  const safeTitle = escHtml((md.title||"").replace(/'/g,"\\'"))
   const radarrBtn = CONFIG?.RADARR?.RADARR_ENABLED
-    ? `<button class="btn-sm btn-radarr" onclick="addToRadarr(${tmdb},'${escHtml((md.title||"").replace(/'/g,"\\'"))}',this)">+ Add to Radarr</button>`
+    ? `<button class="btn-sm btn-radarr" onclick="addToRadarr(${tmdb},'${safeTitle}',this)">+ Radarr</button>`
+    : ""
+  const overseerrBtn = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED
+    ? `<button class="btn-sm btn-overseerr" onclick="addToOverseerr(${tmdb},'${safeTitle}',this)">→ Overseerr</button>`
+    : ""
+  const jellyseerrBtn = CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED
+    ? `<button class="btn-sm btn-jellyseerr" onclick="addToJellyseerr(${tmdb},'${safeTitle}',this)">→ Jellyseerr</button>`
+    : ""
+  const trailerBtn = md.trailer_key
+    ? `<button class="btn-sm btn-trailer" onclick="toggleModalTrailer('${md.trailer_key}')">▶ Trailer</button>`
     : ""
 
   const wInWishlist = fallback.wishlist
@@ -124,10 +134,35 @@ async function openMovieModal(tmdb, fallback = {}) {
     <div class="modal-actions">
       ${wBtn}
       ${radarrBtn}
+      ${overseerrBtn}
+      ${jellyseerrBtn}
+      ${trailerBtn}
       <a href="${md.tmdb_url || `https://www.themoviedb.org/movie/${tmdb}`}"
          target="_blank" rel="noopener"
          class="btn-sm" style="text-decoration:none">↗ TMDB</a>
+    </div>
+    <div id="trailerWrap" style="display:none;margin-top:.75rem;border-radius:8px;overflow:hidden;
+      position:relative;padding-bottom:56.25%;height:0">
+      <iframe id="trailerFrame" src="" frameborder="0" allowfullscreen
+        allow="autoplay; encrypted-media"
+        style="position:absolute;top:0;left:0;width:100%;height:100%;border-radius:8px"></iframe>
     </div>`
+}
+
+function toggleModalTrailer(key) {
+  const wrap  = document.getElementById("trailerWrap")
+  const frame = document.getElementById("trailerFrame")
+  const btn   = document.querySelector(".btn-trailer")
+  if (!wrap || !frame) return
+  if (wrap.style.display === "none") {
+    frame.src = `https://www.youtube-nocookie.com/embed/${key}?autoplay=1`
+    wrap.style.display = "block"
+    if (btn) btn.textContent = "✕ Trailer"
+  } else {
+    frame.src = ""
+    wrap.style.display = "none"
+    if (btn) btn.textContent = "▶ Trailer"
+  }
 }
 
 function closeMovieModal() {
@@ -135,6 +170,9 @@ function closeMovieModal() {
   modal.classList.remove("open")
   _modalOpen = false
   document.body.style.overflow = ""
+  // Stop any playing trailer immediately
+  const frame = document.getElementById("trailerFrame")
+  if (frame) frame.src = ""
   // Small delay to let animation play before clearing content
   setTimeout(() => {
     if (!_modalOpen) {

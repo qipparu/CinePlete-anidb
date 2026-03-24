@@ -5,6 +5,7 @@
 const GROUP_TABS = new Set(["franchises","directors","actors"])
 let _activeGroupFilter = ""
 let _activeGenreFilter = ""
+let _activeRatingFilter = 0   // 0 = no filter
 
 /* Static TMDB genre ID map — stable, no API call needed */
 const GENRE_MAP = {
@@ -103,6 +104,7 @@ function applyFilters(list){
     if (search && !(m.title||"").toLowerCase().includes(search)) return false
     if (year && yearBucket(m.year) !== year) return false
     if (_activeGenreFilter && !(m.genre_ids||[]).includes(parseInt(_activeGenreFilter))) return false
+    if (_activeRatingFilter > 0 && (m.rating||0) < _activeRatingFilter) return false
     return true
   })
 
@@ -130,7 +132,7 @@ function sortList(list){
 
 function updateFilterBar(){
   const bar = document.getElementById("topFilters")
-  const hiddenTabs = new Set(["dashboard","config","notmdb","nomatch"])
+  const hiddenTabs = new Set(["dashboard","config","notmdb","nomatch","duplicates"])
   if (hiddenTabs.has(ACTIVE_TAB)){ bar.style.display="none"; return }
   bar.style.display="flex"
 
@@ -163,6 +165,7 @@ function updateFilterBar(){
         <option value="">All genres</option>
         ${Object.entries(GENRE_MAP).map(([id,name])=>`<option value="${id}"${prevGenreG===id?" selected":""}>${name}</option>`).join("")}
       </select>
+      ${_ratingSliderHtml(_activeRatingFilter)}
       ${sortSelect(prevSort)}`
 
     _initGroupFilter(groups)
@@ -183,6 +186,7 @@ function updateFilterBar(){
         <option value="">All genres</option>
         ${Object.entries(GENRE_MAP).map(([id,name])=>`<option value="${id}"${prevGenre===id?" selected":""}>${name}</option>`).join("")}
       </select>
+      ${_ratingSliderHtml(_activeRatingFilter)}
       ${sortSelect(prevSort)}`
   }
   updateExportBtn()
@@ -191,6 +195,25 @@ function updateFilterBar(){
 function onGenreFilterChange(val) {
   _activeGenreFilter = val
   render()
+}
+
+function getRatingFilter() { return _activeRatingFilter }
+
+function onRatingFilterChange(val) {
+  _activeRatingFilter = parseFloat(val) || 0
+  const lbl = document.getElementById("ratingFilterLabel")
+  if (lbl) lbl.textContent = _activeRatingFilter > 0 ? `≥ ${_activeRatingFilter.toFixed(1)} ⭐` : "Any ⭐"
+  render()
+}
+
+function _ratingSliderHtml(cur) {
+  const label = cur > 0 ? `≥ ${parseFloat(cur).toFixed(1)} ⭐` : "Any ⭐"
+  return `<div style="display:flex;align-items:center;gap:.4rem;flex-shrink:0">
+    <input type="range" id="ratingFilter" min="0" max="9" step="0.5" value="${cur}"
+      style="width:80px;accent-color:var(--gold);cursor:pointer"
+      oninput="onRatingFilterChange(this.value)"/>
+    <span id="ratingFilterLabel" style="font-size:.7rem;color:var(--gold);min-width:58px">${label}</span>
+  </div>`
 }
 
 function sortSelect(cur){

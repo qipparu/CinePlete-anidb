@@ -64,9 +64,10 @@ def scan_movies():
     library_id = _library_id(library_name)
     log.info(f"Jellyfin library '{library_name}' → ID {library_id}")
 
-    media_ids   = {}          # {tmdb_id: title}
-    directors   = defaultdict(set)
-    actors      = defaultdict(set)
+    media_ids    = {}          # {tmdb_id: title}
+    tmdb_id_dupes = {}         # {tmdb_id: [title1, title2, ...]}
+    directors    = defaultdict(set)
+    actors       = defaultdict(set)
     no_tmdb_guid = []
 
     start     = 0
@@ -115,7 +116,12 @@ def scan_movies():
                 no_tmdb_guid.append({"title": title, "year": year})
                 continue
 
-            media_ids[tmdb_id] = title
+            if tmdb_id in media_ids:
+                if tmdb_id not in tmdb_id_dupes:
+                    tmdb_id_dupes[tmdb_id] = [media_ids[tmdb_id]]
+                tmdb_id_dupes[tmdb_id].append(title)
+            else:
+                media_ids[tmdb_id] = title
 
             # People — directors and actors are in the same array
             # Limit actors to top 5 per film — Jellyfin returns ALL cast
@@ -148,6 +154,10 @@ def scan_movies():
         "directors_kept": len(directors),
         "actors_kept":    len(actors),
         "no_tmdb_guid":   len(no_tmdb_guid),
+        "duplicates": [
+            {"tmdb": tmdb_id, "titles": titles}
+            for tmdb_id, titles in tmdb_id_dupes.items()
+        ],
     }
 
     return media_ids, directors, actors, stats, no_tmdb_guid

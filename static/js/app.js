@@ -17,6 +17,7 @@ const PAGE_TITLES = {
   suggestions: "Suggestions",
   notmdb:      "No TMDB GUID",
   nomatch:     "TMDB No Match",
+  duplicates:  "Duplicates",
   wishlist:    "Wishlist",
   config:      "Configuration",
   logs:        "Logs",
@@ -59,6 +60,7 @@ function render(){
   if (ACTIVE_TAB==="suggestions") return renderSuggestions()
   if (ACTIVE_TAB==="notmdb")      return renderNoTmdb()
   if (ACTIVE_TAB==="nomatch")     return renderNoMatch()
+  if (ACTIVE_TAB==="duplicates")  return renderDuplicates()
   if (ACTIVE_TAB==="wishlist")    return renderWishlist()
   if (ACTIVE_TAB==="config")      return renderConfig()
   if (ACTIVE_TAB==="logs")        return renderLogs()
@@ -76,15 +78,34 @@ function setNavActive(tab){
 function setActiveTab(tab){
   ACTIVE_TAB = tab
   setNavActive(tab)
-  if (typeof _activeGroupFilter !== "undefined") _activeGroupFilter = ""
-  if (typeof _activeGenreFilter !== "undefined") _activeGenreFilter = ""
+  if (typeof _activeGroupFilter  !== "undefined") _activeGroupFilter  = ""
+  if (typeof _activeGenreFilter  !== "undefined") _activeGenreFilter  = ""
+  if (typeof _activeRatingFilter !== "undefined") _activeRatingFilter = 0
+  if (typeof _resetPage          !== "undefined") _resetPage(tab)
   const sortEl = document.getElementById("sort")
   if (sortEl){
     if (tab === "suggestions" && sortEl.value === "popularity") sortEl.value = "matches"
     if (tab !== "suggestions" && sortEl.value === "matches")    sortEl.value = "popularity"
   }
   clearSelection()
+  closeSidebar()   // close mobile sidebar when navigating
   render()
+}
+
+/* ============================================================
+   MOBILE SIDEBAR
+============================================================ */
+
+function openSidebar() {
+  document.getElementById("sidebar")?.classList.add("open")
+  document.getElementById("sidebarOverlay")?.classList.add("visible")
+  document.body.style.overflow = "hidden"
+}
+
+function closeSidebar() {
+  document.getElementById("sidebar")?.classList.remove("open")
+  document.getElementById("sidebarOverlay")?.classList.remove("visible")
+  document.body.style.overflow = ""
 }
 
 document.addEventListener("click", e=>{

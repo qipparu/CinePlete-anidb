@@ -98,6 +98,9 @@ function renderConfig(){
   const tg    = cfg.TELEGRAM    ||{}
   const jf    = cfg.JELLYFIN    ||{}
   const srv   = cfg.SERVER      ||{}
+  const ovs   = cfg.OVERSEERR   ||{}
+  const jss   = cfg.JELLYSEERR  ||{}
+  const wh    = cfg.WEBHOOK     ||{}
 
   const mediaServer = (srv.MEDIA_SERVER || "plex").toLowerCase()
 
@@ -214,6 +217,29 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
+        ${sec('Overseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${check("cfg_ovs_enabled", "Enabled", ovs.OVERSEERR_ENABLED)}
+        ${field("cfg_ovs_url",   "Overseerr URL",  ovs.OVERSEERR_URL    ||"")}
+        ${field("cfg_ovs_key",   "API Key",         ovs.OVERSEERR_API_KEY||"", "secret")}
+        ${hint("Point to your Overseerr instance. API key found in Overseerr → Settings → General.")}
+      </div>
+
+      <div class="form-section">
+        ${sec('Jellyseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${check("cfg_jss_enabled", "Enabled", jss.JELLYSEERR_ENABLED)}
+        ${field("cfg_jss_url",   "Jellyseerr URL",  jss.JELLYSEERR_URL    ||"")}
+        ${field("cfg_jss_key",   "API Key",          jss.JELLYSEERR_API_KEY||"", "secret")}
+        ${hint("Same API format as Overseerr. API key found in Jellyseerr → Settings → General.")}
+      </div>
+
+      <div class="form-section">
+        ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${check("cfg_wh_enabled", "Enabled", wh.WEBHOOK_ENABLED)}
+        ${field("cfg_wh_secret",  "Secret (optional)", wh.WEBHOOK_SECRET||"")}
+        ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
+      </div>
+
+      <div class="form-section">
         ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_tg_enabled", "Enabled", tg.TELEGRAM_ENABLED)}
         ${field("cfg_tg_token",   "Bot Token",  tg.TELEGRAM_BOT_TOKEN||"", "secret")}
@@ -292,6 +318,20 @@ async function saveConfig(){
       RADARR_ROOT_FOLDER_PATH:  v("cfg_radarr_root"),
       RADARR_QUALITY_PROFILE_ID:vi("cfg_radarr_quality"),
       RADARR_SEARCH_ON_ADD:     vc("cfg_radarr_search"),
+    },
+    OVERSEERR:{
+      OVERSEERR_ENABLED: vc("cfg_ovs_enabled"),
+      OVERSEERR_URL:     v("cfg_ovs_url"),
+      OVERSEERR_API_KEY: v("cfg_ovs_key"),
+    },
+    JELLYSEERR:{
+      JELLYSEERR_ENABLED: vc("cfg_jss_enabled"),
+      JELLYSEERR_URL:     v("cfg_jss_url"),
+      JELLYSEERR_API_KEY: v("cfg_jss_key"),
+    },
+    WEBHOOK:{
+      WEBHOOK_ENABLED: vc("cfg_wh_enabled"),
+      WEBHOOK_SECRET:  v("cfg_wh_secret"),
     },
     TELEGRAM:{
       TELEGRAM_ENABLED:      vc("cfg_tg_enabled"),
