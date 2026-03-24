@@ -14,17 +14,21 @@ const PAGE_SIZE = 24
 const _tabPage  = {}   // tab → current page count (starts at 1)
 
 function _getPage(tab) { return _tabPage[tab] || 1 }
-function _resetPage(tab) { _tabPage[tab] = 1 }
+function _resetPage(tab) {
+  // Clear the top-level tab page AND any group-level keys (e.g. "franchises-Marvel's Avengers")
+  Object.keys(_tabPage).forEach(k => { if (k === tab || k.startsWith(tab + "-")) delete _tabPage[k] })
+}
 function _loadMore(tab) { _tabPage[tab] = (_tabPage[tab] || 1) + 1; render() }
 
 function _paginate(list, tab) {
-  const page  = _getPage(tab)
-  const shown = page * PAGE_SIZE
-  const slice = list.slice(0, shown)
-  const rem   = list.length - shown
-  const btn   = rem > 0
+  const page    = _getPage(tab)
+  const shown   = page * PAGE_SIZE
+  const slice   = list.slice(0, shown)
+  const rem     = list.length - shown
+  const safeTab = tab.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  const btn     = rem > 0
     ? `<div style="text-align:center;padding:1.5rem 0">
-        <button onclick="_loadMore('${tab}')"
+        <button onclick="_loadMore('${safeTab}')"
           style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);
                  border-radius:8px;padding:.5rem 1.5rem;cursor:pointer;font-family:'DM Mono',monospace;
                  font-size:.75rem">Load ${Math.min(rem,PAGE_SIZE)} more (${rem} remaining)</button>
