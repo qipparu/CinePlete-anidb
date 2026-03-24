@@ -11,8 +11,9 @@ from app.logger import get_logger
 from app import telegram
 
 DATA_DIR = "/data"
-RESULTS_FILE = f"{DATA_DIR}/results.json"
+RESULTS_FILE   = f"{DATA_DIR}/results.json"
 OVERRIDES_FILE = f"{DATA_DIR}/overrides.json"
+SNAPSHOT_FILE  = f"{DATA_DIR}/scan_snapshot.json"
 
 log = get_logger(__name__)
 
@@ -53,6 +54,37 @@ def _set_step(index: int, detail: str = ""):
 
 
 # --------------------------------------------------
+
+def load_snapshot() -> set:
+    """Load the set of TMDB IDs from the last completed scan."""
+    try:
+        with open(SNAPSHOT_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return set(data.get("plex_ids", []))
+    except Exception:
+        return set()
+
+
+def save_snapshot(plex_ids: dict):
+    """Persist current library TMDB IDs for progressive scan comparison."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(SNAPSHOT_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "plex_ids": list(plex_ids.keys()),
+                "saved_at": datetime.utcnow().isoformat() + "Z",
+            }, f)
+    except Exception:
+        pass
+
+
+def read_results() -> dict | None:
+    try:
+        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 
 def write_results(results: dict):
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -122,7 +154,60 @@ def build():
         log.info("Using Plex scanner")
     _set_step(1)
     plex_ids, directors_map, actors_map, plex_stats, no_tmdb_guid = scan_movies()
-    log.info(f"Movies detected: {len(plex_ids)}")
+    duplicates = plex_stats.pop("duplicates", [])
+    log.info(f"Movies detected: {len(plex_ids)}, duplicates: {len(duplicates)}")
+
+    # ---- PROGRESSIVE SCAN CHECK --------------------------------
+    snapshot_ids = load_snapshot()
+    current_ids  = set(plex_ids.keys())
+    if snapshot_ids and current_ids == snapshot_ids:
+        log.info("Progressive scan: library unchanged — reusing cached analysis")
+        prev = read_results()
+        if prev:
+            # Refresh only the dynamic parts (wishlist, stats, no_tmdb_guid)
+            overrides     = load_json(OVERRIDES_FILE)
+            wishlist_movies = set(overrides.get("wishlist_movies", []))
+
+            # Auto-clean wishlist movies now in library
+            cleaned = False
+            for mid in list(wishlist_movies):
+                if mid in plex_ids:
+                    log.info(f"Wishlist auto-cleanup: tmdb {mid} is now in library")
+                    remove_value(overrides["wishlist_movies"], mid)
+                    wishlist_movies.discard(mid)
+                    cleaned = True
+            if cleaned:
+                save_json(OVERRIDES_FILE, overrides)
+
+            tmdb = TMDB(tmdb_api_key)
+            wishlist = []
+            for mid in sorted(wishlist_movies):
+                md = tmdb.movie(mid)
+                if not md:
+                    continue
+                wishlist.append({
+                    "tmdb":       mid,
+                    "title":      md.get("title"),
+                    "year":       (md.get("release_date") or "")[:4] or None,
+                    "poster":     tmdb.poster_url(md.get("poster_path")),
+                    "overview":   md.get("overview", ""),
+                    "genre_ids":  [g["id"] for g in md.get("genres", [])],
+                    "popularity": md.get("popularity", 0),
+                    "votes":      md.get("vote_count", 0),
+                    "rating":     md.get("vote_average", 0),
+                    "wishlist":   True,
+                })
+
+            prev["generated_at"] = datetime.utcnow().isoformat() + "Z"
+            prev["media_server"] = plex_stats
+            prev["no_tmdb_guid"] = no_tmdb_guid
+            prev["duplicates"]   = duplicates
+            prev["wishlist"]     = wishlist
+            prev["scanning"]     = False
+            tmdb.flush()
+            write_results(prev)
+            log.info("Progressive scan completed")
+            return prev
 
     tmdb = TMDB(tmdb_api_key)
     movie_cache: dict = {}
@@ -503,6 +588,7 @@ def build():
         "_ignored_actors":     list(ignore_actors),
         "no_tmdb_guid":   no_tmdb_guid,
         "tmdb_not_found": tmdb_not_found,
+        "duplicates":     duplicates,
         "franchises":     franchises,
         "directors":      directors,
         "actors":         actors,
@@ -512,6 +598,7 @@ def build():
     }
 
     tmdb.flush()
+    save_snapshot(plex_ids)
     write_results(results)
     log.info("Scan completed")
     return results

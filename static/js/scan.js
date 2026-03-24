@@ -36,9 +36,10 @@ function updateBadges(){
     if (n > 0){ el.textContent = n > 99 ? "99+" : n; el.style.display = "" }
     else el.style.display = "none"
   }
-  b("badge-notmdb",  (DATA.no_tmdb_guid   || []).length)
-  b("badge-nomatch", (DATA.tmdb_not_found || []).length)
-  b("badge-wishlist",(DATA.wishlist       || []).length)
+  b("badge-notmdb",     (DATA.no_tmdb_guid   || []).length)
+  b("badge-nomatch",    (DATA.tmdb_not_found || []).length)
+  b("badge-wishlist",   (DATA.wishlist       || []).length)
+  b("badge-duplicates", (DATA.duplicates     || []).length)
 }
 
 async function rescan(){

@@ -8,6 +8,35 @@ const _charts = {}
 function destroyChart(id){ if(_charts[id]){_charts[id].destroy();delete _charts[id]} }
 function mkChart(id,cfg){ destroyChart(id); _charts[id]=new Chart(document.getElementById(id),cfg); return _charts[id] }
 
+/* ── Pagination state ────────────────────────────────────── */
+
+const PAGE_SIZE = 24
+const _tabPage  = {}   // tab → current page count (starts at 1)
+
+function _getPage(tab) { return _tabPage[tab] || 1 }
+function _resetPage(tab) {
+  // Clear the top-level tab page AND any group-level keys (e.g. "franchises-Marvel's Avengers")
+  Object.keys(_tabPage).forEach(k => { if (k === tab || k.startsWith(tab + "-")) delete _tabPage[k] })
+}
+function _loadMore(tab) { _tabPage[tab] = (_tabPage[tab] || 1) + 1; render() }
+
+function _paginate(list, tab) {
+  const page    = _getPage(tab)
+  const shown   = page * PAGE_SIZE
+  const slice   = list.slice(0, shown)
+  const rem     = list.length - shown
+  const safeTab = tab.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+  const btn     = rem > 0
+    ? `<div style="text-align:center;padding:1.5rem 0">
+        <button onclick="_loadMore('${safeTab}')"
+          style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);
+                 border-radius:8px;padding:.5rem 1.5rem;cursor:pointer;font-family:'DM Mono',monospace;
+                 font-size:.75rem">Load ${Math.min(rem,PAGE_SIZE)} more (${rem} remaining)</button>
+      </div>`
+    : ""
+  return { slice, btn }
+}
+
 /* ── Batch selection state ───────────────────────────────── */
 
 const _selected = new Map() // tmdb_id → movie object
@@ -33,13 +62,17 @@ function clearSelection() {
 }
 
 function updateBatchBar() {
-  const bar = document.getElementById("batchBar")
-  const cnt = document.getElementById("batchCount")
+  const bar  = document.getElementById("batchBar")
+  const cnt  = document.getElementById("batchCount")
   if (!bar) return
   const n = _selected.size
   if (n > 0) {
     cnt.textContent = `${n} selected`
     bar.classList.add("visible")
+    const ovsBtn = document.getElementById("batchOverseerr")
+    const jssBtn = document.getElementById("batchJellyseerr")
+    if (ovsBtn) ovsBtn.style.display = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED   ? "" : "none"
+    if (jssBtn) jssBtn.style.display = CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED ? "" : "none"
   } else {
     bar.classList.remove("visible")
   }
@@ -57,15 +90,34 @@ async function batchAddToRadarr() {
 }
 
 async function batchAddToWishlist() {
+  const n = _selected.size
   for (const [tmdb] of _selected) {
     await api("/api/wishlist/add", "POST", { tmdb })
   }
-  toast(`${_selected.size} movies added to Wishlist`, "gold")
+  toast(`${n} movies added to Wishlist`, "gold")
   clearSelection()
-  if (DATA) {
-    const wIds = new Set((DATA.wishlist || []).map(w => w.tmdb))
-    _selected.forEach((_, t) => wIds.add(t))
+}
+
+async function batchAddToOverseerr() {
+  if (!CONFIG?.OVERSEERR?.OVERSEERR_ENABLED) { toast("Overseerr not enabled", "error"); return }
+  let ok = 0, fail = 0
+  for (const [tmdb] of _selected) {
+    const res = await api("/api/overseerr/add", "POST", { tmdb })
+    res.ok ? ok++ : fail++
   }
+  toast(`Overseerr: ${ok} requested${fail ? `, ${fail} failed` : ""}`, ok ? "success" : "error")
+  clearSelection()
+}
+
+async function batchAddToJellyseerr() {
+  if (!CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED) { toast("Jellyseerr not enabled", "error"); return }
+  let ok = 0, fail = 0
+  for (const [tmdb] of _selected) {
+    const res = await api("/api/jellyseerr/add", "POST", { tmdb })
+    res.ok ? ok++ : fail++
+  }
+  toast(`Jellyseerr: ${ok} requested${fail ? `, ${fail} failed` : ""}`, ok ? "success" : "error")
+  clearSelection()
 }
 
 /* ── Poster card (new visual layout) ────────────────────── */
@@ -76,6 +128,12 @@ function posterCard(m, extraTag = "") {
 
   const radarrBtn = CONFIG?.RADARR?.RADARR_ENABLED
     ? `<button class="btn-sm btn-radarr" onclick="event.stopPropagation();addToRadarr(${tmdb},'${safeName}',this)">+ Radarr</button>`
+    : ""
+  const overseerrBtn = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED
+    ? `<button class="btn-sm btn-overseerr" onclick="event.stopPropagation();addToOverseerr(${tmdb},'${safeName}',this)">→ OS</button>`
+    : ""
+  const jellyseerrBtn = CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED
+    ? `<button class="btn-sm btn-jellyseerr" onclick="event.stopPropagation();addToJellyseerr(${tmdb},'${safeName}',this)">→ JS</button>`
     : ""
 
   const wBtn = m.wishlist
@@ -107,7 +165,7 @@ function posterCard(m, extraTag = "") {
     </div>
     <div class="pc-overlay">
       <div class="pc-overlay-title">${escHtml(m.title||"Untitled")}</div>
-      <div class="pc-overlay-actions">${wBtn}${radarrBtn}</div>
+      <div class="pc-overlay-actions">${wBtn}${radarrBtn}${overseerrBtn}${jellyseerrBtn}</div>
     </div>
   </div>`
 }
@@ -177,6 +235,34 @@ async function addToRadarr(tmdb, title, btn){
   } else {
     btn.textContent = "✗ Error"; btn.disabled = false
     toast("Radarr error","error")
+  }
+}
+
+async function addToOverseerr(tmdb, title, btn){
+  btn.disabled = true; btn.textContent = "…"
+  const res = await api("/api/overseerr/add","POST",{tmdb,title})
+  if (res.ok){
+    btn.textContent = "✓ Requested"
+    btn.className   = "btn-sm"
+    btn.style.color = "var(--green)"
+    toast(`${title} → Overseerr`,"success")
+  } else {
+    btn.textContent = "✗"; btn.disabled = false
+    toast("Overseerr error","error")
+  }
+}
+
+async function addToJellyseerr(tmdb, title, btn){
+  btn.disabled = true; btn.textContent = "…"
+  const res = await api("/api/jellyseerr/add","POST",{tmdb,title})
+  if (res.ok){
+    btn.textContent = "✓ Requested"
+    btn.className   = "btn-sm"
+    btn.style.color = "var(--green)"
+    toast(`${title} → Jellyseerr`,"success")
+  } else {
+    btn.textContent = "✗"; btn.disabled = false
+    toast("Jellyseerr error","error")
   }
 }
 
@@ -516,6 +602,9 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
 
     if (!sorted.length) return
 
+    const groupTab = `${ACTIVE_TAB}-${name}`
+    const { slice, btn: moreBtn } = _paginate(sorted, groupTab)
+
     html += `
     <div class="mb-group" style="margin-bottom:2rem">
       <div class="group-header">
@@ -528,7 +617,8 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
         <button class="btn-sm btn-ignore"
           onclick="${ignoreHandler}('${name.replace(/'/g,"\\'")}',this)">Ignore</button>
       </div>
-      <div class="grid-posters">${sorted.map(m=>posterCard(m)).join("")}</div>
+      <div class="grid-posters">${slice.map(m=>posterCard(m)).join("")}</div>
+      ${moreBtn}
     </div>`
   })
 
@@ -593,9 +683,10 @@ function renderClassics(){
   const c    = document.getElementById("content")
   let list   = applyFilters(DATA.classics||[])
   if (!list.length){ c.innerHTML=emptyStateHTML("No missing classics 🎉"); return }
+  const { slice, btn } = _paginate(list, "classics")
   c.innerHTML = `
     <p style="color:var(--text3);font-size:.78rem;margin-bottom:1rem">${list.length} classic films missing from your library</p>
-    <div class="grid-posters">${list.map(m=>posterCard(m)).join("")}</div>`
+    <div class="grid-posters">${slice.map(m=>posterCard(m)).join("")}</div>${btn}`
 }
 
 /* ── Suggestions ─────────────────────────────────────────── */
@@ -604,12 +695,13 @@ function renderSuggestions(){
   const c    = document.getElementById("content")
   const list = applyFilters(DATA.suggestions||[])
   if (!list.length){ c.innerHTML=emptyStateHTML("No suggestions available"); return }
+  const { slice, btn } = _paginate(list, "suggestions")
   c.innerHTML = `
     <p style="color:var(--text3);font-size:.78rem;margin-bottom:1rem">${list.length} films recommended by your library</p>
-    <div class="grid-posters">${list.map(m => posterCard(m, m.rec_score
+    <div class="grid-posters">${slice.map(m => posterCard(m, m.rec_score
       ? `<span style="color:var(--gold);font-size:.6rem">⚡${m.rec_score}</span>`
       : ""
-    )).join("")}</div>`
+    )).join("")}</div>${btn}`
 }
 
 /* ── Wishlist ────────────────────────────────────────────── */
@@ -618,7 +710,8 @@ function renderWishlist(){
   const c    = document.getElementById("content")
   const list = applyFilters(DATA.wishlist||[])
   if (!list.length){ c.innerHTML=emptyStateHTML("Wishlist is empty"); return }
-  c.innerHTML = `<div class="grid-posters">${list.map(m=>posterCard(m)).join("")}</div>`
+  const { slice, btn } = _paginate(list, "wishlist")
+  c.innerHTML = `<div class="grid-posters">${slice.map(m=>posterCard(m)).join("")}</div>${btn}`
 }
 
 /* ── No TMDB GUID ────────────────────────────────────────── */
@@ -699,6 +792,48 @@ async function renderLogs(){
   }
 }
 
+/* ── Duplicates ──────────────────────────────────────────── */
+
+function renderDuplicates(){
+  const c    = document.getElementById("content")
+  const list = DATA.duplicates || []
+  if (!list.length){
+    c.innerHTML = emptyStateHTML("No multi-version entries detected 🎉")
+    return
+  }
+  c.innerHTML = `
+    <p style="color:var(--text3);font-size:.78rem;margin-bottom:1rem">
+      ${list.length} TMDB ID${list.length > 1 ? "s" : ""} appear more than once in your library.<br>
+      This is usually <strong style="color:var(--text2)">intentional</strong> — e.g. Theatrical + Director's Cut share the same TMDB ID.
+      Review and remove any unintentional copies from your media server.
+    </p>
+    <div style="display:flex;flex-direction:column;gap:.4rem">
+      ${list.map(d=>{
+        const titles  = d.titles || []
+        const allSame = titles.every(t => t === titles[0])
+        const tagCls  = allSame ? "tag-red" : "tag-gold"
+        const tagLbl  = allSame ? "DUPE" : "MULTI"
+        const titleHtml = titles.map(t => escHtml(t)).join(
+          `<span style="color:var(--text3);margin:0 .3rem">·</span>`
+        )
+        return `
+        <div class="meta-item">
+          <span class="tag ${tagCls}" style="flex-shrink:0" title="${allSame ? "Same title — likely a true duplicate" : "Different titles — likely different editions"}">${tagLbl}</span>
+          <span class="meta-item-title">${titleHtml}</span>
+          <span class="meta-item-year">
+            ${tag(`tmdb:${d.tmdb}`)}
+            <a href="https://www.themoviedb.org/movie/${d.tmdb}" target="_blank" rel="noopener"
+               style="color:var(--text3);font-size:.65rem;text-decoration:none;margin-left:.3rem">↗</a>
+          </span>
+        </div>`
+      }).join("")}
+    </div>
+    <p style="color:var(--text3);font-size:.68rem;margin-top:1rem">
+      <span style="color:var(--red)">DUPE</span> = identical titles (likely unintentional) &nbsp;·&nbsp;
+      <span style="color:var(--gold)">MULTI</span> = different titles (likely different editions — OK to keep)
+    </p>`
+}
+
 /* ── Export current tab ──────────────────────────────────── */
 
 const EXPORT_TABS = new Set(["franchises","directors","actors","classics","suggestions","wishlist"])
@@ -713,8 +848,21 @@ function exportCurrent(format = "csv") {
   toast(`Exporting ${ACTIVE_TAB} as ${format.toUpperCase()}`, "info")
 }
 
+async function copyLetterboxdToClipboard() {
+  if (!EXPORT_TABS.has(ACTIVE_TAB)) return
+  try {
+    const res  = await fetch(`/api/export?format=letterboxd&tab=${ACTIVE_TAB}`)
+    const text = await res.text()
+    await navigator.clipboard.writeText(text)
+    toast("Letterboxd list copied to clipboard!", "success")
+  } catch(e) {
+    toast("Could not copy to clipboard", "error")
+  }
+}
+
 function updateExportBtn() {
-  const btn = document.getElementById("exportBtn")
-  if (!btn) return
-  btn.style.display = EXPORT_TABS.has(ACTIVE_TAB) ? "" : "none"
+  const btn  = document.getElementById("exportBtn")
+  const cbtn = document.getElementById("clipboardBtn")
+  if (btn)  btn.style.display  = EXPORT_TABS.has(ACTIVE_TAB) ? "" : "none"
+  if (cbtn) cbtn.style.display = EXPORT_TABS.has(ACTIVE_TAB) ? "" : "none"
 }

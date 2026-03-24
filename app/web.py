@@ -2,8 +2,9 @@ import os
 from datetime import datetime
 import json
 import requests
+from urllib.parse import urlparse
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Body, Query
+from fastapi import FastAPI, Body, Query, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
@@ -269,6 +270,86 @@ def radarr_add(payload: dict = Body(...)):
 
 
 # --------------------------------------------------
+# Overseerr
+# --------------------------------------------------
+
+@app.post("/api/overseerr/add")
+def overseerr_add(payload: dict = Body(...)):
+    cfg = load_config().get("OVERSEERR", {})
+    if not cfg.get("OVERSEERR_ENABLED"):
+        return {"ok": False, "error": "Overseerr disabled"}
+    tmdb_id = int(payload.get("tmdb"))
+    headers = {"X-Api-Key": cfg["OVERSEERR_API_KEY"],
+               "Content-Type": "application/json"}
+    try:
+        r = requests.post(
+            f"{cfg['OVERSEERR_URL'].rstrip('/')}/api/v1/request",
+            json={"mediaType": "movie", "mediaId": tmdb_id},
+            headers=headers, timeout=20,
+        )
+    except requests.exceptions.RequestException as e:
+        return {"ok": False, "error": str(e)}
+    if r.status_code not in (200, 201):
+        return {"ok": False, "error": r.text}
+    return {"ok": True}
+
+
+# --------------------------------------------------
+# Jellyseerr
+# --------------------------------------------------
+
+@app.post("/api/jellyseerr/add")
+def jellyseerr_add(payload: dict = Body(...)):
+    cfg = load_config().get("JELLYSEERR", {})
+    if not cfg.get("JELLYSEERR_ENABLED"):
+        return {"ok": False, "error": "Jellyseerr disabled"}
+    tmdb_id = int(payload.get("tmdb"))
+    headers = {"X-Api-Key": cfg["JELLYSEERR_API_KEY"],
+               "Content-Type": "application/json"}
+    try:
+        r = requests.post(
+            f"{cfg['JELLYSEERR_URL'].rstrip('/')}/api/v1/request",
+            json={"mediaType": "movie", "mediaId": tmdb_id},
+            headers=headers, timeout=20,
+        )
+    except requests.exceptions.RequestException as e:
+        return {"ok": False, "error": str(e)}
+    if r.status_code not in (200, 201):
+        return {"ok": False, "error": r.text}
+    return {"ok": True}
+
+
+# --------------------------------------------------
+# Webhook  (POST /api/webhook?secret=xxx)
+# --------------------------------------------------
+
+@app.post("/api/webhook")
+def api_webhook(
+    secret: str = Query(default=""),
+    x_cineplete_secret: str = Header(default="", alias="x-cineplete-secret"),
+):
+    cfg = load_config().get("WEBHOOK", {})
+    if not cfg.get("WEBHOOK_ENABLED"):
+        return {"ok": False, "error": "Webhook disabled"}
+
+    saved_secret = str(cfg.get("WEBHOOK_SECRET", "")).strip()
+    provided     = secret.strip() or x_cineplete_secret.strip()
+
+    if saved_secret and provided != saved_secret:
+        return {"ok": False, "error": "Invalid secret"}
+
+    if scan_state["running"]:
+        return {"ok": False, "error": "Scan already in progress"}
+
+    launched = build_async()
+    if not launched:
+        return {"ok": False, "error": "Could not acquire scan lock"}
+
+    log.info("Webhook triggered scan")
+    return {"ok": True, "message": "Scan started"}
+
+
+# --------------------------------------------------
 # Movie detail (for modal)
 # --------------------------------------------------
 
@@ -300,20 +381,38 @@ def api_movie_detail(tmdb_id: int):
         f"https://image.tmdb.org/t/p/w1280{md['backdrop_path']}"
         if md.get("backdrop_path") else None
     )
+    # Fetch trailer (YouTube key)
+    videos_url = (
+        f"https://api.themoviedb.org/3/movie/{tmdb_id}/videos"
+        f"?api_key={api_key}"
+    )
+    videos_data = t.get(videos_url)
+    trailer_key = None
+    for v in (videos_data.get("results") or []):
+        if v.get("site") == "YouTube" and v.get("type") == "Trailer" and v.get("official"):
+            trailer_key = v["key"]
+            break
+    if not trailer_key:
+        for v in (videos_data.get("results") or []):
+            if v.get("site") == "YouTube" and v.get("type") == "Trailer":
+                trailer_key = v.get("key")
+                break
+
     return {
-        "tmdb":     tmdb_id,
-        "title":    md.get("title"),
-        "year":     (md.get("release_date") or "")[:4],
-        "poster":   t.poster_url(md.get("poster_path")),
-        "backdrop": backdrop,
-        "overview": md.get("overview", ""),
-        "tagline":  md.get("tagline", ""),
-        "rating":   md.get("vote_average", 0),
-        "votes":    md.get("vote_count", 0),
-        "runtime":  md.get("runtime"),
-        "genres":   [g["name"] for g in md.get("genres") or []],
-        "cast":     cast,
-        "tmdb_url": f"https://www.themoviedb.org/movie/{tmdb_id}",
+        "tmdb":        tmdb_id,
+        "title":       md.get("title"),
+        "year":        (md.get("release_date") or "")[:4],
+        "poster":      t.poster_url(md.get("poster_path")),
+        "backdrop":    backdrop,
+        "overview":    md.get("overview", ""),
+        "tagline":     md.get("tagline", ""),
+        "rating":      md.get("vote_average", 0),
+        "votes":       md.get("vote_count", 0),
+        "runtime":     md.get("runtime"),
+        "genres":      [g["name"] for g in md.get("genres") or []],
+        "cast":        cast,
+        "trailer_key": trailer_key,
+        "tmdb_url":    f"https://www.themoviedb.org/movie/{tmdb_id}",
     }
 
 
@@ -423,6 +522,14 @@ def api_jellyfin_test(payload: dict = Body(...)):
 
     if not url or not token:
         return {"ok": False, "error": "URL and API key are required"}
+
+    # SSRF guard: only allow http/https schemes
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return {"ok": False, "error": "URL must start with http:// or https://"}
+    except Exception:
+        return {"ok": False, "error": "Invalid URL format"}
 
     headers = {"X-Emby-Token": token}
 

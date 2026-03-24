@@ -805,6 +805,96 @@
     }
     #exportBtn:hover { background: var(--border); color: var(--text); }
 
+    #clipboardBtn {
+      font-size: .68rem; padding: 4px 11px; border-radius: 7px;
+      border: 1px solid var(--border2); background: var(--bg3);
+      color: var(--text2); cursor: pointer; font-family: 'DM Mono', monospace;
+      transition: background .15s; white-space: nowrap; display: none;
+    }
+    #clipboardBtn:hover { background: var(--border); color: var(--gold); }
+
+    /* Overseerr / Jellyseerr / Trailer buttons */
+    .btn-overseerr {
+      background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.35);
+      color: #60a5fa;
+    }
+    .btn-overseerr:hover { background: rgba(59,130,246,.22); }
+    .btn-jellyseerr {
+      background: rgba(168,85,247,.12); border-color: rgba(168,85,247,.35);
+      color: #c084fc;
+    }
+    .btn-jellyseerr:hover { background: rgba(168,85,247,.22); }
+    .btn-trailer {
+      background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.35);
+      color: #f87171;
+    }
+    .btn-trailer:hover { background: rgba(239,68,68,.22); }
+
+    /* ── HAMBURGER (mobile only) ──────────────── */
+    #hamburgerBtn {
+      display: none;
+      width: 30px; height: 30px; background: var(--bg3); border: 1px solid var(--border2);
+      border-radius: 7px; cursor: pointer; color: var(--text2);
+      align-items: center; justify-content: center; flex-shrink: 0;
+      font-size: 1rem; transition: background .15s;
+    }
+    #hamburgerBtn:hover { background: var(--border); color: var(--text); }
+
+    /* ── SIDEBAR OVERLAY (mobile) ─────────────── */
+    #sidebarOverlay {
+      display: none; position: fixed; inset: 0; z-index: 99;
+      background: rgba(0,0,0,.6); backdrop-filter: blur(2px);
+    }
+    #sidebarOverlay.visible { display: block; }
+
+    /* ── MOBILE LAYOUT ────────────────────────── */
+    @media(max-width:768px){
+      :root { --sidebar-w: 240px; }
+
+      #hamburgerBtn { display: flex; }
+
+      #sidebar {
+        transform: translateX(-100%);
+        z-index: 200;
+        transition: transform .25s ease;
+      }
+      #sidebar.open { transform: translateX(0); }
+
+      #main { margin-left: 0; }
+
+      #topbar { gap: .4rem; padding: .6rem .85rem; }
+      #page-title { font-size: .88rem; }
+
+      #topFilters {
+        flex-wrap: wrap;
+        gap: .35rem;
+      }
+      #topFilters input,
+      #topFilters select { font-size: .72rem; padding: .3rem .5rem; min-width: 0; }
+
+      .grid-posters {
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: .6rem;
+      }
+
+      #content { padding: .85rem; }
+
+      .kpi-strip { grid-template-columns: repeat(3,1fr); }
+      .db-row    { grid-template-columns: 1fr; }
+      .db-row-2  { grid-template-columns: 1fr; }
+
+      #movieModalBox {
+        max-width: 100%;
+        border-radius: 12px;
+        max-height: 90vh;
+      }
+      #movieModalBody { flex-direction: column; }
+      #movieModalPoster, #movieModalPosterPH { width: 100% !important; max-height: 200px; object-fit: cover; }
+
+      .form-section { padding: .85rem; }
+      div[style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
+    }
+
     /* ── KEYBOARD SHORTCUTS MODAL ─────────────── */
     #shortcutsModal {
       position: fixed; inset: 0; z-index: 4000;
@@ -975,6 +1065,11 @@
         TMDB No Match
         <span class="nav-badge" id="badge-nomatch" style="display:none"></span>
       </button>
+      <button class="nav" data-tab="duplicates">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        Multi-Version
+        <span class="nav-badge" id="badge-duplicates" style="display:none"></span>
+      </button>
 
       <div class="nav-section">Missing</div>
       <button class="nav" data-tab="franchises">
@@ -1021,12 +1116,19 @@
     </div>
   </aside>
 
+  <!-- SIDEBAR OVERLAY (mobile) -->
+  <div id="sidebarOverlay" onclick="closeSidebar()"></div>
+
   <!-- MAIN -->
   <div id="main">
     <header id="topbar">
+      <button id="hamburgerBtn" onclick="openSidebar()" title="Menu" aria-label="Open navigation">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
       <div id="page-title">Dashboard</div>
       <div id="topFilters" style="display:none"></div>
-      <button id="exportBtn" onclick="exportCurrent()" title="Export">↓ Export</button>
+      <button id="clipboardBtn" onclick="copyLetterboxdToClipboard()" title="Copy Letterboxd list to clipboard">⎘ Copy</button>
+      <button id="exportBtn" onclick="exportCurrent()" title="Export CSV">↓ Export</button>
       <button class="topbar-btn" id="searchBtn" onclick="openGlobalSearch()" title="Global search (/)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
       </button>
@@ -1056,9 +1158,11 @@
   <!-- BATCH ACTION BAR -->
   <div id="batchBar">
     <span id="batchCount">0 selected</span>
-    <button class="btn-sm btn-radarr" onclick="batchAddToRadarr()">+ All to Radarr</button>
-    <button class="btn-sm btn-wishlist" onclick="batchAddToWishlist()">☆ All to Wishlist</button>
-    <button class="btn-sm btn-ignore" onclick="clearSelection()">✕ Clear</button>
+    <button class="btn-sm btn-radarr"     onclick="batchAddToRadarr()"     id="batchRadarr">+ Radarr</button>
+    <button class="btn-sm btn-overseerr"  onclick="batchAddToOverseerr()"  id="batchOverseerr" style="display:none">→ Overseerr</button>
+    <button class="btn-sm btn-jellyseerr" onclick="batchAddToJellyseerr()" id="batchJellyseerr" style="display:none">→ Jellyseerr</button>
+    <button class="btn-sm btn-wishlist"   onclick="batchAddToWishlist()">☆ Wishlist</button>
+    <button class="btn-sm btn-ignore"     onclick="clearSelection()">✕ Clear</button>
   </div>
 
   <!-- GLOBAL SEARCH MODAL -->
