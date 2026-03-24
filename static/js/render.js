@@ -306,7 +306,7 @@ function renderDashboard(){
     <div class="card card-compact">
       <div class="card-title">Franchise Status</div>
       <div class="chart-duo">
-        <canvas id="cFranchise" width="110" height="110" style="flex-shrink:0"></canvas>
+        <div class="chart-donut-wrap"><canvas id="cFranchise"></canvas></div>
         <div class="legend-stack">
           ${leg("#22c55e","Complete",fComplete,"franchises")}
           ${leg("#F5C518","Missing 1",fOne,"franchises")}
@@ -317,7 +317,7 @@ function renderDashboard(){
     <div class="card card-compact">
       <div class="card-title">Classics Coverage</div>
       <div class="chart-duo">
-        <canvas id="cClassics" width="110" height="110" style="flex-shrink:0"></canvas>
+        <div class="chart-donut-wrap"><canvas id="cClassics"></canvas></div>
         <div class="legend-stack">
           ${leg("#a855f7","In Library",classicsHave,"classics")}
           ${leg("#27272a","Missing",classicsMiss,"classics")}
@@ -327,7 +327,7 @@ function renderDashboard(){
     <div class="card card-compact">
       <div class="card-title">Metadata Health</div>
       <div class="chart-duo">
-        <canvas id="cMeta" width="110" height="110" style="flex-shrink:0"></canvas>
+        <div class="chart-donut-wrap"><canvas id="cMeta"></canvas></div>
         <div class="legend-stack">
           ${leg("#22c55e","Valid TMDB",okMovies)}
           ${leg("#F5C518","No GUID",noGuid,"notmdb")}
@@ -402,6 +402,7 @@ function renderDashboard(){
       data:{labels,datasets:[{data,backgroundColor:colors,borderColor:"#141416",borderWidth:3,hoverOffset:6}]},
       options:{
         cutout:"65%", animation:{duration:700},
+        responsive:true, maintainAspectRatio:false,
         plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${ctx.parsed}`}}},
         onClick:(e,els)=>{ if(els.length&&onClick) onClick(els[0].index) }
       }
