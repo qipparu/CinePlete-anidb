@@ -58,7 +58,10 @@ def current_radarr() -> dict:
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open("/app/static/index.html", "r", encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    # Inject version into script URLs for automatic browser cache-busting
+    # on every new deployment (browsers re-fetch JS when ?v= changes)
+    return html.replace("__VERSION__", APP_VERSION)
 
 
 # --------------------------------------------------
