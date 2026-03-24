@@ -266,6 +266,49 @@ def radarr_add(payload: dict = Body(...)):
 
 
 # --------------------------------------------------
+# Jellyfin connection test
+# --------------------------------------------------
+
+@app.post("/api/jellyfin/test")
+def api_jellyfin_test(payload: dict = Body(...)):
+    """Test Jellyfin connectivity with the provided credentials."""
+    url     = str(payload.get("url",     "")).rstrip("/")
+    token   = str(payload.get("token",   ""))
+    library = str(payload.get("library", "")).strip()
+
+    if not url or not token:
+        return {"ok": False, "error": "URL and API key are required"}
+
+    headers = {"X-Emby-Token": token}
+
+    try:
+        r = requests.get(f"{url}/System/Info", headers=headers, timeout=10)
+        r.raise_for_status()
+    except requests.exceptions.ConnectionError:
+        return {"ok": False, "error": f"Cannot connect to {url}"}
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 401:
+            return {"ok": False, "error": "Invalid API key"}
+        return {"ok": False, "error": f"Server error: {e}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    if not library:
+        return {"ok": True, "message": "Connected successfully"}
+
+    try:
+        r2 = requests.get(f"{url}/Library/MediaFolders", headers=headers, timeout=10)
+        r2.raise_for_status()
+        folders = [i.get("Name", "") for i in r2.json().get("Items", [])]
+        match = next((f for f in folders if f.lower() == library.lower()), None)
+        if not match:
+            return {"ok": False, "error": f"Library '{library}' not found. Available: {', '.join(folders) or 'none'}"}
+        return {"ok": True, "message": f"Connected — library '{match}' found"}
+    except Exception as e:
+        return {"ok": False, "error": f"Could not list libraries: {e}"}
+
+
+# --------------------------------------------------
 # Cache
 # --------------------------------------------------
 

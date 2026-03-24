@@ -5,7 +5,6 @@ from datetime import datetime, date
 from collections import Counter
 
 from app.config import load_config
-from app.plex_xml import scan_movies
 from app.tmdb import TMDB
 from app.overrides import load_json, save_json, remove_value
 from app.logger import get_logger
@@ -40,8 +39,8 @@ STEPS = [
     "Validating TMDB metadata",
     "Analyzing collections",
     "Analyzing directors",
-    "Analyzing actors",
     "Building suggestions",
+    "Analyzing actors",
     "Building results",
 ]
 
@@ -111,10 +110,19 @@ def build():
     wishlist_movies   = set(overrides.get("wishlist_movies", []))
     rec_fetched_ids   = set(overrides.get("rec_fetched_ids", []))
 
-    # ---- PLEX SCAN --------------------------------------------
+    # ---- MEDIA SERVER SCAN ------------------------------------
+    media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
+    if media_server == "jellyfin":
+        from app.jellyfin_api import scan_movies
+        STEPS[1] = "Scanning Jellyfin library"
+        log.info("Using Jellyfin scanner")
+    else:
+        from app.plex_xml import scan_movies
+        STEPS[1] = "Scanning Plex library"
+        log.info("Using Plex scanner")
     _set_step(1)
     plex_ids, directors_map, actors_map, plex_stats, no_tmdb_guid = scan_movies()
-    log.info(f"Plex movies detected: {len(plex_ids)}")
+    log.info(f"Movies detected: {len(plex_ids)}")
 
     tmdb = TMDB(tmdb_api_key)
     movie_cache: dict = {}
@@ -290,7 +298,7 @@ def build():
     classics = sorted(classics, key=lambda x: (-x["rating"], -x["votes"]))
 
     # ---- SUGGESTIONS (based on your library) ------------------
-    _set_step(6, f"{len(plex_ids)} library films")
+    _set_step(5, f"{len(plex_ids)} library films")
 
     # Score map: {tmdb_id: recommendation_count}
     rec_scores: dict = {}
@@ -360,7 +368,7 @@ def build():
     log.info(f"Suggestions built: {len(suggestions)}")
 
     # ---- ACTORS -----------------------------------------------
-    _set_step(5, f"{len(actors_map)} actors")
+    _set_step(6, f"{len(actors_map)} actors")
     actors = []
     actor_missing_total = 0
 
@@ -466,7 +474,7 @@ def build():
     # ---- RESULTS ----------------------------------------------
     results = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
-        "plex": plex_stats,
+        "media_server": plex_stats,
         "scores": {
             "franchise_completion_pct": round(franchise_score, 1),
             "directors_proxy_pct":      round(directors_score, 1),

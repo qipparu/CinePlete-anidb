@@ -74,7 +74,8 @@ async function pollScanStatus(){
     if (durEl && s.last_duration) durEl.textContent = `Last scan took ${fmtDuration(s.last_duration)}`
     updateBadges()
     toast("Scan complete","success")
-    render()
+    if (ACTIVE_TAB === "logs") renderLogs()
+    else render()
   }
 }
 

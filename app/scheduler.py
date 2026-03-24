@@ -38,7 +38,6 @@ def _get_plex_movie_count() -> int | None:
         if not all([url, token, library]):
             return None
 
-        # Get library sections
         r = requests.get(
             f"{url}/library/sections",
             params={"X-Plex-Token": token},
@@ -56,7 +55,6 @@ def _get_plex_movie_count() -> int | None:
         if not key:
             return None
 
-        # Get first page — we only need the totalSize attribute
         r2 = requests.get(
             f"{url}/library/sections/{key}/all",
             params={
@@ -73,7 +71,58 @@ def _get_plex_movie_count() -> int | None:
         return int(total) if total else None
 
     except Exception as e:
-        log.debug(f"Library poll error: {e}")
+        log.debug(f"Plex library poll error: {e}")
+        return None
+
+
+def _get_jellyfin_movie_count() -> int | None:
+    """Return total movie count from Jellyfin or None on error."""
+    try:
+        cfg    = load_config()
+        jf_cfg = cfg.get("JELLYFIN", {})
+        url    = jf_cfg.get("JELLYFIN_URL", "").rstrip("/")
+        token  = jf_cfg.get("JELLYFIN_API_KEY", "")
+        library = jf_cfg.get("JELLYFIN_LIBRARY_NAME", "Movies")
+
+        if not all([url, token, library]):
+            return None
+
+        # Get library ID
+        r = requests.get(
+            f"{url}/Library/MediaFolders",
+            headers={"X-Emby-Token": token},
+            timeout=10,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        lib_id = None
+        for item in data.get("Items", []):
+            if item.get("Name", "").lower() == library.lower():
+                lib_id = item["Id"]
+                break
+
+        if not lib_id:
+            log.warning(f"Jellyfin library '{library}' not found — check JELLYFIN_LIBRARY_NAME in config")
+            return None
+
+        # Get count only — Limit=1 is enough to get TotalRecordCount
+        r2 = requests.get(
+            f"{url}/Items",
+            headers={"X-Emby-Token": token},
+            params={
+                "ParentId":         lib_id,
+                "IncludeItemTypes": "Movie",
+                "Recursive":        "true",
+                "Limit":            1,
+            },
+            timeout=10,
+        )
+        r2.raise_for_status()
+        return r2.json().get("TotalRecordCount")
+
+    except Exception as e:
+        log.debug(f"Jellyfin library poll error: {e}")
         return None
 
 
@@ -82,7 +131,8 @@ def _get_last_scan_count() -> int | None:
     try:
         with open(RESULTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("plex", {}).get("indexed_tmdb")
+        stats = data.get("media_server") or data.get("plex") or {}
+        return stats.get("indexed_tmdb")
     except Exception:
         return None
 
@@ -96,9 +146,14 @@ def _poll():
         log.debug("Library poll skipped — scan already running")
         return
 
-    current = _get_plex_movie_count()
+    cfg = load_config()
+    media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
+    if media_server == "jellyfin":
+        current = _get_jellyfin_movie_count()
+    else:
+        current = _get_plex_movie_count()
     if current is None:
-        log.debug("Library poll: could not reach Plex")
+        log.debug("Library poll: could not reach media server")
         return
 
     last = _get_last_scan_count()
@@ -136,7 +191,8 @@ def start(interval_minutes: int):
         replace_existing=True,
     )
     _scheduler.start()
-    log.info(f"Library polling started — checking every {interval_minutes} minute(s)")
+    media_server = load_config().get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
+    log.info(f"Library polling started — watching {media_server} every {interval_minutes} minute(s)")
 
 
 def stop():
