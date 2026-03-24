@@ -8,7 +8,111 @@ const _charts = {}
 function destroyChart(id){ if(_charts[id]){_charts[id].destroy();delete _charts[id]} }
 function mkChart(id,cfg){ destroyChart(id); _charts[id]=new Chart(document.getElementById(id),cfg); return _charts[id] }
 
-/* ── Movie card ──────────────────────────────────────────── */
+/* ── Batch selection state ───────────────────────────────── */
+
+const _selected = new Map() // tmdb_id → movie object
+
+function toggleSelect(tmdb, m, checkbox) {
+  if (_selected.has(tmdb)) {
+    _selected.delete(tmdb)
+    checkbox.closest(".pc")?.classList.remove("selected")
+  } else {
+    _selected.set(tmdb, m)
+    checkbox.closest(".pc")?.classList.add("selected")
+  }
+  updateBatchBar()
+}
+
+function clearSelection() {
+  _selected.clear()
+  document.querySelectorAll(".pc-check").forEach(c => {
+    c.checked = false
+    c.closest(".pc")?.classList.remove("selected")
+  })
+  updateBatchBar()
+}
+
+function updateBatchBar() {
+  const bar = document.getElementById("batchBar")
+  const cnt = document.getElementById("batchCount")
+  if (!bar) return
+  const n = _selected.size
+  if (n > 0) {
+    cnt.textContent = `${n} selected`
+    bar.classList.add("visible")
+  } else {
+    bar.classList.remove("visible")
+  }
+}
+
+async function batchAddToRadarr() {
+  if (!CONFIG?.RADARR?.RADARR_ENABLED) { toast("Radarr not enabled", "error"); return }
+  let ok = 0, fail = 0
+  for (const [tmdb, m] of _selected) {
+    const res = await api("/api/radarr/add", "POST", { tmdb, title: m.title })
+    res.ok ? ok++ : fail++
+  }
+  toast(`Radarr: ${ok} added${fail ? `, ${fail} failed` : ""}`, ok ? "success" : "error")
+  clearSelection()
+}
+
+async function batchAddToWishlist() {
+  for (const [tmdb] of _selected) {
+    await api("/api/wishlist/add", "POST", { tmdb })
+  }
+  toast(`${_selected.size} movies added to Wishlist`, "gold")
+  clearSelection()
+  if (DATA) {
+    const wIds = new Set((DATA.wishlist || []).map(w => w.tmdb))
+    _selected.forEach((_, t) => wIds.add(t))
+  }
+}
+
+/* ── Poster card (new visual layout) ────────────────────── */
+
+function posterCard(m, extraTag = "") {
+  const tmdb     = m.tmdb
+  const safeName = (m.title || "").replace(/'/g, "\\'").replace(/"/g, "&quot;")
+
+  const radarrBtn = CONFIG?.RADARR?.RADARR_ENABLED
+    ? `<button class="btn-sm btn-radarr" onclick="event.stopPropagation();addToRadarr(${tmdb},'${safeName}',this)">+ Radarr</button>`
+    : ""
+
+  const wBtn = m.wishlist
+    ? `<button class="btn-sm btn-wishlisted" onclick="event.stopPropagation();removeWishlist(${tmdb},this)">★</button>`
+    : `<button class="btn-sm btn-wishlist"   onclick="event.stopPropagation();addWishlist(${tmdb},this)">☆</button>`
+
+  const rating = parseFloat(m.rating || 0).toFixed(1)
+
+  const imgHtml = m.poster
+    ? `<img class="pc-img" src="${m.poster}" loading="lazy" alt=""/>`
+    : `<div class="pc-no-img"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".3"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 2v20M17 2v20M2 12h20"/></svg><span>No Image</span></div>`
+
+  const mSafe = JSON.stringify({ tmdb: m.tmdb, title: m.title, year: m.year, poster: m.poster, wishlist: m.wishlist })
+    .replace(/'/g, "\\'")
+
+  return `
+  <div class="pc" onclick="openMovieModal(${tmdb},${mSafe.replace(/"/g,'&quot;')})">
+    <input type="checkbox" class="pc-check"
+      onclick="event.stopPropagation();toggleSelect(${tmdb},${mSafe.replace(/"/g,'&quot;')},this)"
+      title="Select"/>
+    ${imgHtml}
+    <div class="pc-info">
+      <div class="pc-title" title="${escHtml(m.title||"")}">${escHtml(m.title||"Untitled")}</div>
+      <div class="pc-meta">
+        <span class="pc-rating">⭐ ${rating}</span>
+        ${m.year ? `<span>${m.year}</span>` : ""}
+        ${extraTag}
+      </div>
+    </div>
+    <div class="pc-overlay">
+      <div class="pc-overlay-title">${escHtml(m.title||"Untitled")}</div>
+      <div class="pc-overlay-actions">${wBtn}${radarrBtn}</div>
+    </div>
+  </div>`
+}
+
+/* ── Legacy horizontal card (kept for backward compat) ──── */
 
 function movieCard(m, extraTag = ""){
   const poster = m.poster
@@ -27,11 +131,11 @@ function movieCard(m, extraTag = ""){
   const pop    = Math.round(m.popularity||0)
 
   return `
-  <div class="movie-card">
+  <div class="movie-card" onclick="openMovieModal(${m.tmdb},${JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,wishlist:m.wishlist}).replace(/"/g,'&quot;')})">
     <div class="movie-card-inner">
       ${poster}
       <div class="movie-body">
-        <div class="movie-title">${m.title||"Untitled"} <span class="movie-year">${m.year?`(${m.year})`:""}</span></div>
+        <div class="movie-title">${escHtml(m.title||"Untitled")} <span class="movie-year">${m.year?`(${m.year})`:""}</span></div>
         <div class="movie-meta">
           ${tag(`⭐ ${rating}`,"tag-gold")}
           ${m.votes ? tag(`${(m.votes/1000).toFixed(0)}k votes`) : ""}
@@ -91,7 +195,8 @@ function emptyStateHTML(msg){
 function renderDashboard(){
   const c = document.getElementById("content")
   const s = DATA.scores||{}
-  const p = DATA.plex  ||{}
+  // Support both old "plex" key and new "media_server" key
+  const p = DATA.media_server || DATA.plex || {}
 
   const ignoredFranchises = new Set(DATA._ignored_franchises||[])
   let fComplete=0,fOne=0,fMore=0
@@ -287,6 +392,7 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
   const c           = document.getElementById("content")
   const groupFilter = getGroupFilter()
   const sort        = getSort()
+  const genreFilter = getGenreFilter()
 
   let html = ""
 
@@ -294,20 +400,25 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
     const name = g[nameKey]||""
     if (groupFilter && name !== groupFilter) return
 
-    const sorted = [...(g.missing||[])].sort((a,b)=>{
+    let sorted = [...(g.missing||[])].sort((a,b)=>{
       if(sort==="title")  return (a.title||"").localeCompare(b.title||"")
       if(sort==="year")   return parseInt(b.year||0)-parseInt(a.year||0)
       if(sort==="rating") return (b.rating||0)-(a.rating||0)
       if(sort==="votes")  return (b.votes||0)-(a.votes||0)
       return (b.popularity||0)-(a.popularity||0)
     })
+
+    if (genreFilter) {
+      sorted = sorted.filter(m => (m.genre_ids||[]).includes(parseInt(genreFilter)))
+    }
+
     if (!sorted.length) return
 
     html += `
     <div class="mb-group" style="margin-bottom:2rem">
       <div class="group-header">
         <div>
-          <span class="group-name">${nameIcon} ${name}</span>
+          <span class="group-name">${nameIcon} ${escHtml(name)}</span>
           ${g.have!==undefined
             ? `<span class="group-count">${g.have}/${g.total} in library</span>`
             : `<span class="group-count">${sorted.length} missing</span>`}
@@ -315,7 +426,7 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
         <button class="btn-sm btn-ignore"
           onclick="${ignoreHandler}('${name.replace(/'/g,"\\'")}',this)">Ignore</button>
       </div>
-      <div class="grid-2">${sorted.map(movieCard).join("")}</div>
+      <div class="grid-posters">${sorted.map(m=>posterCard(m)).join("")}</div>
     </div>`
   })
 
@@ -378,11 +489,11 @@ async function ignoreActor(name, btn){
 
 function renderClassics(){
   const c    = document.getElementById("content")
-  const list = applyFilters(DATA.classics||[])
+  let list   = applyFilters(DATA.classics||[])
   if (!list.length){ c.innerHTML=emptyStateHTML("No missing classics 🎉"); return }
   c.innerHTML = `
     <p style="color:var(--text3);font-size:.78rem;margin-bottom:1rem">${list.length} classic films missing from your library</p>
-    <div class="grid-2">${list.map(movieCard).join("")}</div>`
+    <div class="grid-posters">${list.map(m=>posterCard(m)).join("")}</div>`
 }
 
 /* ── Suggestions ─────────────────────────────────────────── */
@@ -393,8 +504,8 @@ function renderSuggestions(){
   if (!list.length){ c.innerHTML=emptyStateHTML("No suggestions available"); return }
   c.innerHTML = `
     <p style="color:var(--text3);font-size:.78rem;margin-bottom:1rem">${list.length} films recommended by your library</p>
-    <div class="grid-2">${list.map(m => movieCard(m, m.rec_score
-      ? `<span class="tag tag-gold" style="font-size:.6rem">⚡ ${m.rec_score} match${m.rec_score>1?"es":""}</span>`
+    <div class="grid-posters">${list.map(m => posterCard(m, m.rec_score
+      ? `<span style="color:var(--gold);font-size:.6rem">⚡${m.rec_score}</span>`
       : ""
     )).join("")}</div>`
 }
@@ -405,7 +516,7 @@ function renderWishlist(){
   const c    = document.getElementById("content")
   const list = applyFilters(DATA.wishlist||[])
   if (!list.length){ c.innerHTML=emptyStateHTML("Wishlist is empty"); return }
-  c.innerHTML = `<div class="grid-2">${list.map(movieCard).join("")}</div>`
+  c.innerHTML = `<div class="grid-posters">${list.map(m=>posterCard(m)).join("")}</div>`
 }
 
 /* ── No TMDB GUID ────────────────────────────────────────── */
@@ -420,7 +531,7 @@ function renderNoTmdb(){
       ${list.map(m=>`
       <div class="meta-item">
         <span class="tag tag-red" style="flex-shrink:0">NO GUID</span>
-        <span class="meta-item-title">${m.title||"Unknown"}</span>
+        <span class="meta-item-title">${escHtml(m.title||"Unknown")}</span>
         ${m.year?`<span class="meta-item-year">(${m.year})</span>`:""}
       </div>`).join("")}
     </div>`
@@ -438,7 +549,7 @@ function renderNoMatch(){
       ${list.map(m=>`
       <div class="meta-item">
         <span class="tag tag-red" style="flex-shrink:0">NO MATCH</span>
-        <span class="meta-item-title">${m.title || "Unknown title"}</span>
+        <span class="meta-item-title">${escHtml(m.title || "Unknown title")}</span>
         <span class="meta-item-year">${tag(`tmdb:${m.tmdb}`)}</span>
       </div>`).join("")}
     </div>`
@@ -461,7 +572,6 @@ async function renderLogs(){
     const res  = await fetch("/api/logs?lines=200")
     const data = await res.json()
     const box  = document.getElementById("log-box")
-    // Build log lines safely using textContent to prevent XSS
     box.innerHTML = ""
     data.lines.forEach(line => {
       let color = "var(--text2)"
@@ -471,7 +581,7 @@ async function renderLogs(){
       else if (line.includes("[INFO    ]")) color = "var(--text)"
       const div = document.createElement("div")
       div.style.cssText = `color:${color};white-space:pre-wrap;word-break:break-all`
-      div.textContent = line   // textContent never parses HTML — safe against XSS
+      div.textContent = line
       box.appendChild(div)
     })
     box.scrollTop = box.scrollHeight
@@ -485,4 +595,24 @@ async function renderLogs(){
       box.appendChild(span)
     }
   }
+}
+
+/* ── Export current tab ──────────────────────────────────── */
+
+const EXPORT_TABS = new Set(["franchises","directors","actors","classics","suggestions","wishlist"])
+
+function exportCurrent(format = "csv") {
+  if (!EXPORT_TABS.has(ACTIVE_TAB)) return
+  const url = `/api/export?format=${format}&tab=${ACTIVE_TAB}`
+  const a   = document.createElement("a")
+  a.href    = url
+  a.download = `cineplete-${ACTIVE_TAB}.csv`
+  a.click()
+  toast(`Exporting ${ACTIVE_TAB} as ${format.toUpperCase()}`, "info")
+}
+
+function updateExportBtn() {
+  const btn = document.getElementById("exportBtn")
+  if (!btn) return
+  btn.style.display = EXPORT_TABS.has(ACTIVE_TAB) ? "" : "none"
 }
