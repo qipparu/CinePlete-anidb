@@ -235,7 +235,7 @@ function renderConfig(){
       <div class="form-section">
         ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_wh_enabled", "Enabled", wh.WEBHOOK_ENABLED)}
-        ${field("cfg_wh_secret",  "Secret (optional)", wh.WEBHOOK_SECRET||"")}
+        ${field("cfg_wh_secret",  "Secret (optional)", wh.WEBHOOK_SECRET||"", "secret")}
         ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
       </div>
 
