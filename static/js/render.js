@@ -794,21 +794,40 @@ function renderDuplicates(){
   const c    = document.getElementById("content")
   const list = DATA.duplicates || []
   if (!list.length){
-    c.innerHTML = emptyStateHTML("No duplicate TMDB IDs detected 🎉")
+    c.innerHTML = emptyStateHTML("No multi-version entries detected 🎉")
     return
   }
   c.innerHTML = `
     <p style="color:var(--text3);font-size:.78rem;margin-bottom:1rem">
-      ${list.length} TMDB IDs found more than once in your library — same film imported twice
+      ${list.length} TMDB ID${list.length > 1 ? "s" : ""} appear more than once in your library.<br>
+      This is usually <strong style="color:var(--text2)">intentional</strong> — e.g. Theatrical + Director's Cut share the same TMDB ID.
+      Review and remove any unintentional copies from your media server.
     </p>
     <div style="display:flex;flex-direction:column;gap:.4rem">
-      ${list.map(d=>`
-      <div class="meta-item">
-        <span class="tag tag-red" style="flex-shrink:0">DUPE</span>
-        <span class="meta-item-title">${escHtml((d.titles||[]).join(" · "))}</span>
-        <span class="meta-item-year">${tag(`tmdb:${d.tmdb}`)}</span>
-      </div>`).join("")}
-    </div>`
+      ${list.map(d=>{
+        const titles  = d.titles || []
+        const allSame = titles.every(t => t === titles[0])
+        const tagCls  = allSame ? "tag-red" : "tag-gold"
+        const tagLbl  = allSame ? "DUPE" : "MULTI"
+        const titleHtml = titles.map(t => escHtml(t)).join(
+          `<span style="color:var(--text3);margin:0 .3rem">·</span>`
+        )
+        return `
+        <div class="meta-item">
+          <span class="tag ${tagCls}" style="flex-shrink:0" title="${allSame ? "Same title — likely a true duplicate" : "Different titles — likely different editions"}">${tagLbl}</span>
+          <span class="meta-item-title">${titleHtml}</span>
+          <span class="meta-item-year">
+            ${tag(`tmdb:${d.tmdb}`)}
+            <a href="https://www.themoviedb.org/movie/${d.tmdb}" target="_blank" rel="noopener"
+               style="color:var(--text3);font-size:.65rem;text-decoration:none;margin-left:.3rem">↗</a>
+          </span>
+        </div>`
+      }).join("")}
+    </div>
+    <p style="color:var(--text3);font-size:.68rem;margin-top:1rem">
+      <span style="color:var(--red)">DUPE</span> = identical titles (likely unintentional) &nbsp;·&nbsp;
+      <span style="color:var(--gold)">MULTI</span> = different titles (likely different editions — OK to keep)
+    </p>`
 }
 
 /* ── Export current tab ──────────────────────────────────── */

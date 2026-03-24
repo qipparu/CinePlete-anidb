@@ -17,7 +17,7 @@ const PAGE_TITLES = {
   suggestions: "Suggestions",
   notmdb:      "No TMDB GUID",
   nomatch:     "TMDB No Match",
-  duplicates:  "Duplicates",
+  duplicates:  "Multi-Version",
   wishlist:    "Wishlist",
   config:      "Configuration",
   logs:        "Logs",
