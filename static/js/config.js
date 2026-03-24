@@ -64,6 +64,22 @@ function toggleSecret(id){
   }
 }
 
+async function testJellyfinConnection(){
+  const url     = document.getElementById("cfg_jf_url")?.value?.trim()
+  const token   = document.getElementById("cfg_jf_key")?.value?.trim()
+  const library = document.getElementById("cfg_jf_library")?.value?.trim()
+  const result  = document.getElementById("jf-test-result")
+
+  if (!url || !token) { toast("Enter Jellyfin URL and API key first", "error"); return }
+  if (result) result.textContent = "Testing…"
+
+  const res = await api("/api/jellyfin/test", "POST", { url, token, library })
+  if (result) {
+    result.textContent = res.ok ? `✓ ${res.message}` : `✗ ${res.error}`
+    result.style.color = res.ok ? "var(--green)" : "var(--red)"
+  }
+}
+
 function toggleMediaServer(){
   const val = document.getElementById("cfg_media_server")?.value
   document.getElementById("plex-fields").style.display     = val === "plex"     ? "block" : "none"
@@ -148,6 +164,10 @@ function renderConfig(){
           ${field("cfg_jf_url",     "Jellyfin URL",  jf.JELLYFIN_URL          ||"")}
           ${field("cfg_jf_key",     "API Key",        jf.JELLYFIN_API_KEY      ||"", "secret")}
           ${field("cfg_jf_library", "Library Name",   jf.JELLYFIN_LIBRARY_NAME ||"Movies")}
+          <div style="display:flex;align-items:center;gap:.75rem;margin-top:.25rem">
+            <button class="btn-sm" style="font-size:.72rem;padding:5px 14px" onclick="testJellyfinConnection()">Test Connection</button>
+            <span id="jf-test-result" style="font-size:.72rem"></span>
+          </div>
         </div>
 
       </div>

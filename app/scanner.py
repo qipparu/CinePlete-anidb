@@ -474,7 +474,7 @@ def build():
     # ---- RESULTS ----------------------------------------------
     results = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
-        "plex": plex_stats,
+        "media_server": plex_stats,
         "scores": {
             "franchise_completion_pct": round(franchise_score, 1),
             "directors_proxy_pct":      round(directors_score, 1),

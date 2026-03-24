@@ -103,6 +103,7 @@ def _get_jellyfin_movie_count() -> int | None:
                 break
 
         if not lib_id:
+            log.warning(f"Jellyfin library '{library}' not found — check JELLYFIN_LIBRARY_NAME in config")
             return None
 
         # Get count only — Limit=1 is enough to get TotalRecordCount
@@ -130,7 +131,8 @@ def _get_last_scan_count() -> int | None:
     try:
         with open(RESULTS_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("plex", {}).get("indexed_tmdb")
+        stats = data.get("media_server") or data.get("plex") or {}
+        return stats.get("indexed_tmdb")
     except Exception:
         return None
 
@@ -189,7 +191,8 @@ def start(interval_minutes: int):
         replace_existing=True,
     )
     _scheduler.start()
-    log.info(f"Library polling started — checking every {interval_minutes} minute(s)")
+    media_server = load_config().get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
+    log.info(f"Library polling started — watching {media_server} every {interval_minutes} minute(s)")
 
 
 def stop():

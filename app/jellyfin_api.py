@@ -88,7 +88,7 @@ def scan_movies():
             year  = str(item.get("ProductionYear", "")) or None
 
             # RunTimeTicks → minutes (1 tick = 100 nanoseconds)
-            ticks      = item.get("RunTimeTicks") or 0
+            ticks        = int(item.get("RunTimeTicks") or 0)
             duration_min = ticks / 600_000_000
 
             if duration_min and duration_min < short_movie_limit:
@@ -112,8 +112,8 @@ def scan_movies():
             media_ids[tmdb_id] = title
 
             # People — directors and actors are in the same array
-            # Limit actors to top 5 per film to match Plex behavior
-            # (Jellyfin returns ALL people including minor roles)
+            # Limit actors to top 5 per film — Jellyfin returns ALL cast
+            # including minor roles, so we cap to keep recommendations focused
             actor_count = 0
             for person in item.get("People", []):
                 name      = person.get("Name", "").strip()
