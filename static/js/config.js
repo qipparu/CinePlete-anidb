@@ -383,7 +383,7 @@ async function triggerWatchtowerUpdate() {
   const el = document.getElementById("wtchStatus")
   if (el) { el.textContent = "Triggering…"; el.style.color = "var(--text3)" }
   try {
-    const r = await api("/api/watchtower/update", { method: "POST" })
+    const r = await api("/api/watchtower/update", "POST")
     if (r.ok) {
       if (el) { el.textContent = "✓ Update triggered"; el.style.color = "var(--green)" }
       toast("Watchtower update triggered — new image will pull shortly", "success")
