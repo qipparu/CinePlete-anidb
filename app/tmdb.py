@@ -14,6 +14,8 @@ CACHE_FILE = f"{DATA_DIR}/tmdb_cache.json"
 # Flush cache to disk every N real HTTP calls so a crash doesn't lose all progress
 FLUSH_EVERY = 50
 
+_RETRY_DELAYS = (2, 4, 8)   # seconds between network-error retries
+
 
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -64,45 +66,68 @@ class TMDB:
     def _request(self, url: str) -> dict:
         cache_key = self._cache_key(url)
 
-        try:
-            r = requests.get(url, timeout=30)
-        except requests.exceptions.ConnectionError as e:
-            self._error_count += 1
-            log.error(f"TMDB connection error — check network. url={cache_key} error={e}")
-            return {}
-        except requests.exceptions.Timeout:
-            self._error_count += 1
-            log.warning(f"TMDB request timed out — url={cache_key}")
-            return {}
-        except Exception as e:
-            self._error_count += 1
-            log.error(f"TMDB unexpected request error — url={cache_key} error={e}")
-            return {}
+        for attempt, delay in enumerate([0] + list(_RETRY_DELAYS), start=1):
+            if delay:
+                log.debug(f"TMDB retry {attempt}/{len(_RETRY_DELAYS)+1} in {delay}s — {cache_key}")
+                time.sleep(delay)
 
-        if r.status_code == 401:
-            self._error_count += 1
-            log.error("TMDB API key is invalid or missing (HTTP 401) — check your TMDB_API_KEY in config")
-            return {}
+            try:
+                r = requests.get(url, timeout=30)
+            except requests.exceptions.ConnectionError as e:
+                self._error_count += 1
+                log.warning(f"TMDB connection error (attempt {attempt}) — {cache_key}: {e}")
+                if attempt > len(_RETRY_DELAYS):
+                    log.error(f"TMDB connection failed after {attempt} attempts — giving up")
+                    return {}
+                continue
+            except requests.exceptions.Timeout:
+                self._error_count += 1
+                log.warning(f"TMDB timeout (attempt {attempt}) — {cache_key}")
+                if attempt > len(_RETRY_DELAYS):
+                    log.error(f"TMDB timed out after {attempt} attempts — giving up")
+                    return {}
+                continue
+            except Exception as e:
+                self._error_count += 1
+                log.error(f"TMDB unexpected request error — {cache_key}: {e}")
+                return {}
 
-        if r.status_code == 404:
-            log.debug(f"TMDB 404 — resource not found: {cache_key}")
-            return {}
+            if r.status_code == 401:
+                self._error_count += 1
+                log.error("TMDB API key is invalid or missing (HTTP 401) — check your TMDB_API_KEY in config")
+                return {}
 
-        if r.status_code == 429:
-            self._error_count += 1
-            log.warning("TMDB rate limit hit (HTTP 429) — consider increasing TMDB_MIN_DELAY in config")
-            return {}
+            if r.status_code == 404:
+                log.debug(f"TMDB 404 — resource not found: {cache_key}")
+                return {}
 
-        if r.status_code != 200:
-            self._error_count += 1
-            log.warning(f"TMDB unexpected status {r.status_code} — url={cache_key}")
-            return {}
+            if r.status_code == 429:
+                self._error_count += 1
+                wait = int(r.headers.get("Retry-After", 60))
+                log.warning(f"TMDB rate limit hit (HTTP 429) — waiting {wait}s before retry")
+                time.sleep(wait)
+                continue
 
-        try:
-            return r.json()
-        except Exception as e:
-            log.warning(f"TMDB response JSON parse error — url={cache_key} error={e}")
-            return {}
+            if r.status_code >= 500:
+                self._error_count += 1
+                log.warning(f"TMDB server error {r.status_code} (attempt {attempt}) — {cache_key}")
+                if attempt > 1:
+                    return {}
+                time.sleep(5)
+                continue
+
+            if r.status_code != 200:
+                self._error_count += 1
+                log.warning(f"TMDB unexpected status {r.status_code} — {cache_key}")
+                return {}
+
+            try:
+                return r.json()
+            except Exception as e:
+                log.warning(f"TMDB response JSON parse error — {cache_key}: {e}")
+                return {}
+
+        return {}
 
     def get(self, url: str) -> dict:
         cache_key = self._cache_key(url)
