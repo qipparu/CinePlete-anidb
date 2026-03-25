@@ -10,7 +10,7 @@ from app.overrides import load_json, save_json, remove_value
 from app.logger import get_logger
 from app import telegram
 
-DATA_DIR = "/data"
+DATA_DIR = os.getenv("DATA_DIR", "/data")
 RESULTS_FILE   = f"{DATA_DIR}/results.json"
 OVERRIDES_FILE = f"{DATA_DIR}/overrides.json"
 SNAPSHOT_FILE  = f"{DATA_DIR}/scan_snapshot.json"

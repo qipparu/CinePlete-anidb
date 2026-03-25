@@ -14,12 +14,17 @@ from app.overrides import load_json, save_json, add_unique, remove_value
 from app.logger import get_logger
 from app import scheduler
 
-DATA_DIR       = "/data"
+DATA_DIR       = os.getenv("DATA_DIR", "/data")
 RESULTS_FILE   = f"{DATA_DIR}/results.json"
 OVERRIDES_FILE = f"{DATA_DIR}/overrides.json"
 LOG_FILE       = f"{DATA_DIR}/cineplete.log"
 
-APP_VERSION = os.getenv("APP_VERSION", "dev")
+APP_VERSION  = os.getenv("APP_VERSION", "dev")
+STATIC_DIR   = os.getenv("STATIC_DIR", "/app/static")
+GITHUB_REPO = "sdblepas/CinePlete"
+
+# Simple in-memory cache for GitHub release check (avoid hammering the API)
+_release_cache: dict = {"checked_at": 0, "latest": None, "url": None}
 
 log = get_logger(__name__)
 
@@ -33,7 +38,7 @@ async def lifespan(app: FastAPI):
     scheduler.stop()
 
 app = FastAPI(lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="/app/static"), name="static")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 # --------------------------------------------------
@@ -58,7 +63,7 @@ def current_radarr() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    with open("/app/static/index.html", "r", encoding="utf-8") as f:
+    with open(f"{STATIC_DIR}/index.html", "r", encoding="utf-8") as f:
         html = f.read()
     # Inject version into script URLs for automatic browser cache-busting
     # on every new deployment (browsers re-fetch JS when ?v= changes)
@@ -69,9 +74,40 @@ def index():
 # Version
 # --------------------------------------------------
 
+def _get_latest_release() -> dict:
+    """Check GitHub for the latest release, cached for 1 hour."""
+    import time
+    now = time.time()
+    if now - _release_cache["checked_at"] < 3600:
+        return _release_cache
+    try:
+        r = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            _release_cache["latest"] = data.get("tag_name", "").lstrip("v")
+            _release_cache["url"]    = data.get("html_url", "")
+    except Exception:
+        pass
+    _release_cache["checked_at"] = now
+    return _release_cache
+
+
 @app.get("/api/version")
 def api_version():
-    return {"version": APP_VERSION}
+    cache = _get_latest_release()
+    current = APP_VERSION.lstrip("v")
+    latest  = cache.get("latest")
+    has_update = bool(latest and latest != current and current not in ("dev", "e2e"))
+    return {
+        "version":    APP_VERSION,
+        "latest":     latest,
+        "has_update": has_update,
+        "release_url": cache.get("url") if has_update else None,
+    }
 
 
 # --------------------------------------------------
@@ -347,6 +383,43 @@ def api_webhook(
 
     log.info("Webhook triggered scan")
     return {"ok": True, "message": "Scan started"}
+
+
+# --------------------------------------------------
+# Watchtower  (POST /api/watchtower/update)
+# --------------------------------------------------
+
+@app.post("/api/watchtower/update")
+def api_watchtower_update():
+    cfg = load_config().get("WATCHTOWER", {})
+    if not cfg.get("WATCHTOWER_ENABLED"):
+        return {"ok": False, "error": "Watchtower disabled"}
+
+    url   = str(cfg.get("WATCHTOWER_URL", "")).rstrip("/")
+    token = str(cfg.get("WATCHTOWER_API_TOKEN", "")).strip()
+
+    if not url:
+        return {"ok": False, "error": "Watchtower URL not configured"}
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return {"ok": False, "error": "Invalid Watchtower URL scheme"}
+
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+    # Fire-and-forget: Watchtower pulls + restarts the container (kills this process too),
+    # so we dispatch in a background thread and return immediately.
+    def _fire():
+        try:
+            r = requests.post(f"{url}/v1/update?scope=cineplete", headers=headers, timeout=300)
+            log.info(f"Watchtower update response: HTTP {r.status_code}")
+        except Exception as e:
+            log.warning(f"Watchtower update error: {e}")
+
+    import threading
+    threading.Thread(target=_fire, daemon=True).start()
+    log.info("Watchtower update dispatched (fire-and-forget)")
+    return {"ok": True, "message": "Update request sent — container will restart shortly"}
 
 
 # --------------------------------------------------

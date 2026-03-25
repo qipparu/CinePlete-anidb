@@ -323,6 +323,15 @@ async function boot(){
   try {
     const v = await api("/api/version")
     document.querySelector(".version").textContent = `${v.version} · Cineplete`
+    if (v.has_update && v.latest && v.release_url) {
+      const banner = document.getElementById("update-banner")
+      if (banner) {
+        banner.innerHTML =
+          `⬆ v${v.latest} available — <a href="${v.release_url}" target="_blank" rel="noopener"
+            style="color:var(--gold);text-decoration:underline">Release notes</a>`
+        banner.style.display = "block"
+      }
+    }
   } catch(e) {}
 
   if (CONFIGURED) await loadResults()
