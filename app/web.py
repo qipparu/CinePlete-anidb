@@ -96,12 +96,26 @@ def _get_latest_release() -> dict:
     return _release_cache
 
 
+def _parse_ver(v: str):
+    """Parse a semver string into a comparable tuple, e.g. '2.4.0' → (2, 4, 0)."""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except Exception:
+        return (0, 0, 0)
+
+
 @app.get("/api/version")
 def api_version():
     cache = _get_latest_release()
     current = APP_VERSION.lstrip("v")
     latest  = cache.get("latest")
-    has_update = bool(latest and latest != current and current not in ("dev", "e2e"))
+    # Only show update banner when latest is strictly NEWER than current.
+    # If current > latest (e.g. pre-release ahead of published tag) → no banner.
+    has_update = bool(
+        latest
+        and current not in ("dev", "e2e")
+        and _parse_ver(latest) > _parse_ver(current)
+    )
     return {
         "version":    APP_VERSION,
         "latest":     latest,
