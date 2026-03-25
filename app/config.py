@@ -2,6 +2,10 @@ import os
 import copy
 import yaml
 
+from app.logger import get_logger
+
+log = get_logger(__name__)
+
 CONFIG_DIR = "/config"
 CONFIG_FILE = f"{CONFIG_DIR}/config.yml"
 
@@ -117,7 +121,8 @@ def load_config() -> dict:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return _deep_merge(DEFAULT_CONFIG, data)
-    except Exception:
+    except (OSError, yaml.YAMLError) as e:
+        log.warning(f"Could not load config file: {e} — using defaults")
         return copy.deepcopy(DEFAULT_CONFIG)
 
 
