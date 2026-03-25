@@ -9,6 +9,7 @@
 ![Self Hosted](https://img.shields.io/badge/self--hosted-ready-brightgreen)
 ![Multi-Arch](https://img.shields.io/badge/docker-multiarch-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-powered-green)
+[![Playwright](https://img.shields.io/badge/tested%20with-Playwright-45ba4b?logo=playwright&logoColor=white)](https://playwright.dev)
 
 ![Plex](https://img.shields.io/badge/Plex-compatible-orange)
 ![Jellyfin](https://img.shields.io/badge/Jellyfin-compatible-7B2FBE)
