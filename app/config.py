@@ -77,6 +77,11 @@ DEFAULT_CONFIG = {
         "WEBHOOK_ENABLED": False,
         "WEBHOOK_SECRET": "",
     },
+    "WATCHTOWER": {
+        "WATCHTOWER_ENABLED": False,
+        "WATCHTOWER_URL": "",
+        "WATCHTOWER_API_TOKEN": "",
+    },
 }
 
 

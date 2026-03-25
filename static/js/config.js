@@ -101,6 +101,7 @@ function renderConfig(){
   const ovs   = cfg.OVERSEERR   ||{}
   const jss   = cfg.JELLYSEERR  ||{}
   const wh    = cfg.WEBHOOK     ||{}
+  const wtch  = cfg.WATCHTOWER  ||{}
 
   const mediaServer = (srv.MEDIA_SERVER || "plex").toLowerCase()
 
@@ -240,6 +241,17 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
+        ${sec('Watchtower <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${check("cfg_wtch_enabled", "Auto-update enabled", wtch.WATCHTOWER_ENABLED)}
+        ${field("cfg_wtch_url",   "Watchtower URL",  wtch.WATCHTOWER_URL        ||"")}
+        ${field("cfg_wtch_token", "API Token",        wtch.WATCHTOWER_API_TOKEN  ||"", "secret")}
+        ${hint("Pulls the latest CinePlete image automatically. Enable the Watchtower HTTP API with <code style='color:var(--gold)'>WATCHTOWER_HTTP_API_UPDATE=true</code> and set a matching token.")}
+        <button class="btn-sm" style="margin-top:.5rem;font-size:.72rem;padding:5px 14px;border-color:rgba(59,130,246,.3);color:var(--blue)"
+          onclick="triggerWatchtowerUpdate()">⬆ Update Now</button>
+        <span id="wtchStatus" style="font-size:.72rem;color:var(--text3);margin-left:.5rem"></span>
+      </div>
+
+      <div class="form-section">
         ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_tg_enabled", "Enabled", tg.TELEGRAM_ENABLED)}
         ${field("cfg_tg_token",   "Bot Token",  tg.TELEGRAM_BOT_TOKEN||"", "secret")}
@@ -333,6 +345,11 @@ async function saveConfig(){
       WEBHOOK_ENABLED: vc("cfg_wh_enabled"),
       WEBHOOK_SECRET:  v("cfg_wh_secret"),
     },
+    WATCHTOWER:{
+      WATCHTOWER_ENABLED:   vc("cfg_wtch_enabled"),
+      WATCHTOWER_URL:       v("cfg_wtch_url"),
+      WATCHTOWER_API_TOKEN: v("cfg_wtch_token"),
+    },
     TELEGRAM:{
       TELEGRAM_ENABLED:      vc("cfg_tg_enabled"),
       TELEGRAM_BOT_TOKEN:    v("cfg_tg_token"),
@@ -359,5 +376,22 @@ async function saveConfig(){
     st.textContent = "✗ Error saving"
     st.style.color = "var(--red)"
     toast("Error saving config","error")
+  }
+}
+async function triggerWatchtowerUpdate() {
+  const el = document.getElementById("wtchStatus")
+  if (el) { el.textContent = "Triggering…"; el.style.color = "var(--text3)" }
+  try {
+    const r = await api("/api/watchtower/update", { method: "POST" })
+    if (r.ok) {
+      if (el) { el.textContent = "✓ Update triggered"; el.style.color = "var(--green)" }
+      toast("Watchtower update triggered — new image will pull shortly", "success")
+    } else {
+      if (el) { el.textContent = `✗ ${r.error||r.status}`; el.style.color = "var(--red)" }
+      toast(`Watchtower error: ${r.error||r.status}`, "error")
+    }
+  } catch(e) {
+    if (el) { el.textContent = "✗ Request failed"; el.style.color = "var(--red)" }
+    toast("Watchtower request failed", "error")
   }
 }
