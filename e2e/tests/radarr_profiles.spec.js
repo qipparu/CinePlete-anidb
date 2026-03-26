@@ -83,8 +83,8 @@ test.describe('Radarr quality profile dropdown — primary instance', () => {
     )
     await fetchBtn.click()
 
-    // Toast with success class should appear
-    const toast = page.locator('.toast.success, #toast.success, [class*="toast"][class*="success"]')
+    // Toast with success class should appear (toast() adds type as class)
+    const toast = page.locator('#toastContainer .toast.success')
     await expect(toast).toBeVisible({ timeout: 3000 })
   })
 
@@ -111,7 +111,7 @@ test.describe('Radarr quality profile dropdown — primary instance', () => {
     )
     await fetchBtn.click()
 
-    const toast = page.locator('.toast.error, #toast.error, [class*="toast"][class*="error"]')
+    const toast = page.locator('#toastContainer .toast.error')
     await expect(toast).toBeVisible({ timeout: 3000 })
     await expect(toast).toContainText('Invalid API key')
   })
@@ -159,7 +159,7 @@ test.describe('Radarr quality profile dropdown — 4K instance', () => {
     )
     await fetchBtn.click()
 
-    const toast = page.locator('.toast.error, #toast.error, [class*="toast"][class*="error"]')
+    const toast = page.locator('#toastContainer .toast.error')
     await expect(toast).toBeVisible({ timeout: 3000 })
     await expect(toast).toContainText('URL and API key required')
   })
