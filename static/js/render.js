@@ -250,8 +250,8 @@ async function addToRadarr4k(tmdb, title, btn){
     btn.style.color = "var(--green)"
     toast(`${title} sent to Radarr 4K`,"success")
   } else {
-    btn.textContent = "✗"; btn.disabled = false
-    toast("Radarr 4K error","error")
+    btn.textContent = "✗ 4K"; btn.disabled = false
+    toast(`Radarr 4K: ${res.error||"unknown error"}`,"error")
   }
 }
 
