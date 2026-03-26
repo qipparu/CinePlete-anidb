@@ -12,7 +12,7 @@ async function api(path, method = "GET", body = null){
 function toast(msg, type = "info"){
   const colors = { info: "#9090a0", success: "#22c55e", error: "#ef4444", gold: "#F5C518" }
   const el = document.createElement("div")
-  el.className = "toast"
+  el.className = `toast ${type}`
   el.innerHTML = `
     <div class="toast-dot" style="background:${colors[type]||colors.info}"></div>
     <span>${msg}</span>`

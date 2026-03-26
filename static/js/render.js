@@ -129,6 +129,9 @@ function posterCard(m, extraTag = "") {
   const radarrBtn = CONFIG?.RADARR?.RADARR_ENABLED
     ? `<button class="btn-sm btn-radarr" onclick="event.stopPropagation();addToRadarr(${tmdb},'${safeName}',this)">+ Radarr</button>`
     : ""
+  const radarr4kBtn = CONFIG?.RADARR_4K?.RADARR_4K_ENABLED
+    ? `<button class="btn-sm btn-radarr" style="opacity:.75" onclick="event.stopPropagation();addToRadarr4k(${tmdb},'${safeName}',this)">+ 4K</button>`
+    : ""
   const overseerrBtn = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED
     ? `<button class="btn-sm btn-overseerr" onclick="event.stopPropagation();addToOverseerr(${tmdb},'${safeName}',this)">→ OS</button>`
     : ""
@@ -165,7 +168,7 @@ function posterCard(m, extraTag = "") {
     </div>
     <div class="pc-overlay">
       <div class="pc-overlay-title">${escHtml(m.title||"Untitled")}</div>
-      <div class="pc-overlay-actions">${wBtn}${radarrBtn}${overseerrBtn}${jellyseerrBtn}</div>
+      <div class="pc-overlay-actions">${wBtn}${radarrBtn}${radarr4kBtn}${overseerrBtn}${jellyseerrBtn}</div>
     </div>
   </div>`
 }
@@ -234,7 +237,21 @@ async function addToRadarr(tmdb, title, btn){
     toast(`${title} sent to Radarr`,"success")
   } else {
     btn.textContent = "✗ Error"; btn.disabled = false
-    toast("Radarr error","error")
+    toast(`Radarr: ${res.error||"unknown error"}`,"error")
+  }
+}
+
+async function addToRadarr4k(tmdb, title, btn){
+  btn.disabled = true; btn.textContent = "…"
+  const res = await api("/api/radarr/add?instance=4k","POST",{tmdb,title})
+  if (res.ok){
+    btn.textContent = "✓ In 4K"
+    btn.className   = "btn-sm"
+    btn.style.color = "var(--green)"
+    toast(`${title} sent to Radarr 4K`,"success")
+  } else {
+    btn.textContent = "✗ 4K"; btn.disabled = false
+    toast(`Radarr 4K: ${res.error||"unknown error"}`,"error")
   }
 }
 
@@ -248,7 +265,7 @@ async function addToOverseerr(tmdb, title, btn){
     toast(`${title} → Overseerr`,"success")
   } else {
     btn.textContent = "✗"; btn.disabled = false
-    toast("Overseerr error","error")
+    toast(`Overseerr: ${res.error||"unknown error"}`,"error")
   }
 }
 
@@ -262,7 +279,7 @@ async function addToJellyseerr(tmdb, title, btn){
     toast(`${title} → Jellyseerr`,"success")
   } else {
     btn.textContent = "✗"; btn.disabled = false
-    toast("Jellyseerr error","error")
+    toast(`Jellyseerr: ${res.error||"unknown error"}`,"error")
   }
 }
 
@@ -292,8 +309,12 @@ function renderDashboard(){
   })
 
   const classicsMiss  = (DATA.classics||[]).length
-  const classicsTotal = Math.round(classicsMiss/(1-(s.classics_proxy_pct||0)/100))||classicsMiss
-  const classicsHave  = Math.max(0,classicsTotal-classicsMiss)
+  const classicsPct   = s.classics_proxy_pct||0
+  const _cTotal       = classicsMiss === 0
+    ? (classicsPct >= 100 ? null : 0)   // null = "all done", 0 = not configured
+    : Math.round(classicsMiss/(1-classicsPct/100))||classicsMiss
+  const classicsTotal = _cTotal ?? 0
+  const classicsHave  = _cTotal === null ? null : Math.max(0, classicsTotal - classicsMiss)
 
   const noGuid  = p.no_tmdb_guid||0
   const noMatch = (DATA.tmdb_not_found||[]).length
@@ -381,7 +402,7 @@ function renderDashboard(){
   <div class="kpi-strip">
     ${kpi(Math.round(s.franchise_completion_pct??0)+"%","Franchise","#F5C518","franchises",`${fComplete} complete · ${fOne+fMore} gaps`)}
     ${kpi(Math.round(s.directors_proxy_pct??0)+"%","Directors","#3b82f6","directors",`${(DATA.directors||[]).length} tracked`)}
-    ${kpi(Math.round(s.classics_proxy_pct??0)+"%","Classics","#a855f7","classics",`${classicsHave}/${classicsTotal} in library`)}
+    ${kpi(Math.round(s.classics_proxy_pct??0)+"%","Classics","#a855f7","classics",classicsHave===null?"All done! 🎉":`${classicsHave}/${classicsTotal} in library`)}
     ${kpi(Math.round(s.global_cinema_score??0)+"%","Global Score","#22c55e","","composite")}
     ${kpi(totalMissing,"Total Missing","var(--text)","franchises","unique films")}
     ${kpi((DATA.wishlist||[]).length,"Wishlist","var(--gold)","wishlist","saved for later")}
@@ -405,7 +426,7 @@ function renderDashboard(){
       <div class="chart-duo">
         <div class="chart-donut-wrap"><canvas id="cClassics"></canvas></div>
         <div class="legend-stack">
-          ${leg("#a855f7","In Library",classicsHave,"classics")}
+          ${leg("#a855f7","In Library",classicsHave??classicsTotal,"classics")}
           ${leg("#27272a","Missing",classicsMiss,"classics")}
         </div>
       </div>
@@ -499,7 +520,8 @@ function renderDashboard(){
       ["#22c55e","#F5C518","#ef4444"],i=>{ if(i>0) setActiveTab("franchises") }
     ))
     mkChart("cClassics",doughnut(
-      ["In Library","Missing"],[classicsHave,classicsMiss],
+      ["In Library","Missing"],
+      classicsHave===null ? [1,0] : [classicsHave,classicsMiss],
       ["#a855f7","#27272a"],i=>{ if(i===1) setActiveTab("classics") }
     ))
     mkChart("cMeta",doughnut(

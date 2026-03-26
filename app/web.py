@@ -105,6 +105,41 @@ def current_radarr() -> dict:
     return load_config()["RADARR"]
 
 
+def _radarr_post(cfg_section: dict, prefix: str, tmdb_id: int, title: str) -> dict:
+    """Shared logic for posting a movie to any Radarr instance."""
+    url     = str(cfg_section.get(f"{prefix}_URL", "")).rstrip("/")
+    api_key = str(cfg_section.get(f"{prefix}_API_KEY", "")).strip()
+    root    = str(cfg_section.get(f"{prefix}_ROOT_FOLDER_PATH", ""))
+    quality = int(cfg_section.get(f"{prefix}_QUALITY_PROFILE_ID", 6))
+    monitored = bool(cfg_section.get(f"{prefix}_MONITORED", True))
+    search    = bool(cfg_section.get(f"{prefix}_SEARCH_ON_ADD", False))
+
+    if not url:
+        return {"ok": False, "error": "Radarr URL not configured"}
+
+    body = {
+        "title":            title,
+        "tmdbId":           tmdb_id,
+        "qualityProfileId": quality,
+        "rootFolderPath":   root,
+        "monitored":        monitored,
+        "addOptions":       {"searchForMovie": search},
+    }
+    try:
+        r = requests.post(
+            f"{url}/api/v3/movie",
+            json=body,
+            headers={"X-Api-Key": api_key},
+            timeout=20,
+        )
+    except requests.exceptions.RequestException as e:
+        return {"ok": False, "error": str(e)}
+
+    if r.status_code not in (200, 201):
+        return {"ok": False, "error": r.text}
+    return {"ok": True}
+
+
 # --------------------------------------------------
 # Static
 # --------------------------------------------------
@@ -430,41 +465,61 @@ def wishlist_remove(payload: dict = Body(...)):
 # Radarr
 # --------------------------------------------------
 
-@app.post("/api/radarr/add")
-def radarr_add(payload: dict = Body(...)):
-    radarr_cfg = current_radarr()
+@app.get("/api/radarr/profiles")
+def radarr_profiles(instance: str = Query(default="primary")):
+    """Fetch quality profiles from a Radarr instance for the config UI dropdown."""
+    cfg = load_config()
+    if instance == "4k":
+        section = cfg.get("RADARR_4K", {})
+        url = str(section.get("RADARR_4K_URL", "")).rstrip("/")
+        key = str(section.get("RADARR_4K_API_KEY", "")).strip()
+    else:
+        section = cfg.get("RADARR", {})
+        url = str(section.get("RADARR_URL", "")).rstrip("/")
+        key = str(section.get("RADARR_API_KEY", "")).strip()
 
-    if not radarr_cfg["RADARR_ENABLED"]:
-        return {"ok": False, "error": "Radarr disabled"}
+    if not url or not key:
+        return {"ok": False, "error": "URL and API key required"}
 
-    tmdb_id = int(payload.get("tmdb"))
-    title   = payload.get("title")
-
-    body = {
-        "title":            title,
-        "tmdbId":           tmdb_id,
-        "qualityProfileId": int(radarr_cfg["RADARR_QUALITY_PROFILE_ID"]),
-        "rootFolderPath":   radarr_cfg["RADARR_ROOT_FOLDER_PATH"],
-        "monitored":        bool(radarr_cfg["RADARR_MONITORED"]),
-        "addOptions":       {"searchForMovie": bool(radarr_cfg.get("RADARR_SEARCH_ON_ADD", False))},
-    }
-
-    headers = {"X-Api-Key": radarr_cfg["RADARR_API_KEY"]}
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return {"ok": False, "error": "Invalid Radarr URL"}
 
     try:
-        r = requests.post(
-            f"{radarr_cfg['RADARR_URL']}/api/v3/movie",
-            json=body,
-            headers=headers,
-            timeout=20,
+        r = requests.get(
+            f"{url}/api/v3/qualityprofile",
+            headers={"X-Api-Key": key},
+            timeout=10,
         )
     except requests.exceptions.RequestException as e:
         return {"ok": False, "error": str(e)}
 
-    if r.status_code not in (200, 201):
-        return {"ok": False, "error": r.text}
+    if r.status_code == 401:
+        return {"ok": False, "error": "Invalid API key"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"HTTP {r.status_code}"}
 
-    return {"ok": True}
+    profiles = [{"id": p["id"], "name": p["name"]} for p in r.json()]
+    return {"ok": True, "profiles": profiles}
+
+
+@app.post("/api/radarr/add")
+def radarr_add(payload: dict = Body(...), instance: str = Query(default="primary")):
+    tmdb_id = int(payload.get("tmdb"))
+    title   = str(payload.get("title", ""))
+    cfg     = load_config()
+
+    if instance == "4k":
+        section = cfg.get("RADARR_4K", {})
+        if not section.get("RADARR_4K_ENABLED"):
+            return {"ok": False, "error": "Radarr 4K disabled"}
+        return _radarr_post(section, "RADARR_4K", tmdb_id, title)
+
+    # primary
+    section = cfg.get("RADARR", {})
+    if not section.get("RADARR_ENABLED"):
+        return {"ok": False, "error": "Radarr disabled"}
+    return _radarr_post(section, "RADARR", tmdb_id, title)
 
 
 

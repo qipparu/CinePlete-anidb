@@ -2,6 +2,47 @@
    config.js — Config tab renderer, save, cache management
 ============================================================ */
 
+// Returns the HTML for a quality profile select + Fetch button
+function qualityProfileField(id, currentId, instance) {
+  return `
+  <div class="form-group">
+    <label class="form-label">Quality Profile</label>
+    <div style="display:flex;gap:.5rem;align-items:center">
+      <select id="${id}"
+        style="flex:1;background:var(--bg3);border:1px solid var(--border2);
+               border-radius:8px;color:var(--text);font-family:'DM Mono',monospace;
+               font-size:.82rem;padding:.45rem .6rem;outline:none">
+        <option value="${currentId||0}">${currentId ? `⚠ ID ${currentId} — click Fetch to verify` : "— click Fetch to load profiles —"}</option>
+      </select>
+      <button type="button" class="btn-sm" style="white-space:nowrap;font-size:.72rem;padding:5px 12px"
+        onclick="fetchRadarrProfiles('${instance}','${id}')">⟳ Fetch</button>
+    </div>
+  </div>`
+}
+
+async function fetchRadarrProfiles(instance, selectId) {
+  const btn = event.target
+  btn.disabled = true; btn.textContent = "…"
+  try {
+    const res = await api(`/api/radarr/profiles?instance=${instance}`)
+    if (!res.ok) {
+      toast(`Could not fetch profiles: ${res.error}`, "error")
+      return
+    }
+    const sel = document.getElementById(selectId)
+    if (!sel) return
+    const current = parseInt(sel.value) || 0
+    sel.innerHTML = res.profiles.map(p =>
+      `<option value="${p.id}" ${p.id === current ? "selected" : ""}>${p.name} (${p.id})</option>`
+    ).join("")
+    toast("Quality profiles loaded", "success")
+  } catch(e) {
+    toast(`Failed to fetch profiles: ${e?.message||"network error"}`, "error")
+  } finally {
+    btn.disabled = false; btn.textContent = "⟳ Fetch"
+  }
+}
+
 function _ageStr(s){
   if (s < 3600)  return `${Math.floor(s/60)}m ago`
   if (s < 86400) return `${Math.floor(s/3600)}h ago`
@@ -92,6 +133,7 @@ function renderConfig(){
   const plex  = cfg.PLEX        ||{}
   const tmdb  = cfg.TMDB        ||{}
   const radarr= cfg.RADARR      ||{}
+  const r4k   = cfg.RADARR_4K   ||{}
   const cls   = cfg.CLASSICS    ||{}
   const act   = cfg.ACTOR_HITS  ||{}
   const auto  = cfg.AUTOMATION  ||{}
@@ -238,6 +280,18 @@ function renderConfig(){
         ${sec("Automation")}
         ${field("cfg_poll_interval","Library poll interval (min, 0 = disabled)", auto.LIBRARY_POLL_INTERVAL??30,"number")}
         ${hint("Auto-scans when your media server library size changes.")}
+        <div class="form-group">
+          <label class="form-label">Scheduled rescan</label>
+          <select id="cfg_auto_scan_schedule"
+            style="width:100%;background:var(--bg3);border:1px solid var(--border2);
+                   border-radius:8px;color:var(--text);font-family:'DM Mono',monospace;
+                   font-size:.82rem;padding:.45rem .6rem;outline:none">
+            <option value="off"    ${(auto.AUTO_SCAN_SCHEDULE||"off")==="off"    ?"selected":""}>Off</option>
+            <option value="daily"  ${auto.AUTO_SCAN_SCHEDULE==="daily"  ?"selected":""}>Daily at 02:00</option>
+            <option value="weekly" ${auto.AUTO_SCAN_SCHEDULE==="weekly" ?"selected":""}>Weekly on Sunday at 02:00</option>
+          </select>
+        </div>
+        ${hint("Full rescan on a fixed schedule, regardless of library changes.")}
       </div>
 
       <div class="form-section" id="cache-section">
@@ -257,11 +311,22 @@ function renderConfig(){
       <div class="form-section">
         ${sec('Radarr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_radarr_enabled", "Enabled", radarr.RADARR_ENABLED)}
-        ${field("cfg_radarr_url",     "Radarr URL",         radarr.RADARR_URL              ||"")}
-        ${field("cfg_radarr_key",     "Radarr API Key",     radarr.RADARR_API_KEY          ||"", "secret")}
-        ${field("cfg_radarr_root",    "Root Folder Path",   radarr.RADARR_ROOT_FOLDER_PATH ||"")}
-        ${field("cfg_radarr_quality", "Quality Profile ID", radarr.RADARR_QUALITY_PROFILE_ID??6,"number")}
-        ${check("cfg_radarr_search",  "Search &amp; download on add", radarr.RADARR_SEARCH_ON_ADD)}
+        ${field("cfg_radarr_url",  "Radarr URL",     radarr.RADARR_URL     ||"")}
+        ${field("cfg_radarr_key",  "Radarr API Key", radarr.RADARR_API_KEY ||"", "secret")}
+        ${field("cfg_radarr_root", "Root Folder Path", radarr.RADARR_ROOT_FOLDER_PATH ||"")}
+        ${qualityProfileField("cfg_radarr_quality", radarr.RADARR_QUALITY_PROFILE_ID??0, "primary")}
+        ${check("cfg_radarr_search", "Search &amp; download on add", radarr.RADARR_SEARCH_ON_ADD)}
+      </div>
+
+      <div class="form-section">
+        ${sec('Radarr 4K <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${check("cfg_r4k_enabled", "Enabled", r4k.RADARR_4K_ENABLED)}
+        ${field("cfg_r4k_url",  "Radarr 4K URL",      r4k.RADARR_4K_URL     ||"")}
+        ${field("cfg_r4k_key",  "Radarr 4K API Key",  r4k.RADARR_4K_API_KEY ||"", "secret")}
+        ${field("cfg_r4k_root", "Root Folder Path",   r4k.RADARR_4K_ROOT_FOLDER_PATH ||"")}
+        ${qualityProfileField("cfg_r4k_quality", r4k.RADARR_4K_QUALITY_PROFILE_ID??0, "4k")}
+        ${check("cfg_r4k_search", "Search &amp; download on add", r4k.RADARR_4K_SEARCH_ON_ADD)}
+        ${hint("Shows a separate '+ 4K' button on every movie card.")}
       </div>
 
       <div class="form-section">
@@ -353,6 +418,14 @@ async function saveConfig(){
       RADARR_QUALITY_PROFILE_ID:vi("cfg_radarr_quality"),
       RADARR_SEARCH_ON_ADD:     vc("cfg_radarr_search"),
     },
+    RADARR_4K:{
+      RADARR_4K_ENABLED:           vc("cfg_r4k_enabled"),
+      RADARR_4K_URL:               v("cfg_r4k_url"),
+      RADARR_4K_API_KEY:           v("cfg_r4k_key"),
+      RADARR_4K_ROOT_FOLDER_PATH:  v("cfg_r4k_root"),
+      RADARR_4K_QUALITY_PROFILE_ID:vi("cfg_r4k_quality"),
+      RADARR_4K_SEARCH_ON_ADD:     vc("cfg_r4k_search"),
+    },
     OVERSEERR:{
       OVERSEERR_ENABLED: vc("cfg_ovs_enabled"),
       OVERSEERR_URL:     v("cfg_ovs_url"),
@@ -380,6 +453,7 @@ async function saveConfig(){
     },
     AUTOMATION:{
       LIBRARY_POLL_INTERVAL: vi("cfg_poll_interval"),
+      AUTO_SCAN_SCHEDULE:    v("cfg_auto_scan_schedule"),
     },
     AUTH:{
       AUTH_METHOD:   v("cfg_auth_method"),
@@ -402,7 +476,7 @@ async function saveConfig(){
   } else {
     st.textContent = "✗ Error saving"
     st.style.color = "var(--red)"
-    toast("Error saving config","error")
+    toast(`Error saving config: ${res.error||"unknown error"}`,"error")
   }
 }
 async function triggerWatchtowerUpdate() {
