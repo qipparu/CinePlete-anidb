@@ -778,8 +778,10 @@ function _lbUrlManager(savedUrls, moviesRes) {
       }).join("")
     : `<p style="color:var(--text3);font-size:.75rem;padding:.4rem 0">No lists added yet</p>`
 
-  const stats = moviesRes && moviesRes.movies?.length
-    ? `<span style="color:var(--text3);font-size:.72rem;margin-left:.5rem">${moviesRes.movies.length} movies</span>`
+  const count = moviesRes?.movies?.length || 0
+  const owned = moviesRes?.owned_count   || 0
+  const stats = count
+    ? `<span style="color:var(--text3);font-size:.72rem">${count} movies${owned ? ` · ${owned} already owned hidden` : ""}</span>`
     : ""
 
   return `
@@ -787,7 +789,11 @@ function _lbUrlManager(savedUrls, moviesRes) {
                 padding:1rem 1.2rem;margin-bottom:1.5rem">
       <div style="font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
                   color:var(--text3);margin-bottom:.75rem;display:flex;align-items:center;gap:.5rem">
-        Letterboxd Lists${stats}
+        Letterboxd Lists
+        ${stats}
+        <button onclick="renderLetterboxd()"
+          style="margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;
+                 font-size:.85rem;padding:2px 6px;flex-shrink:0;line-height:1" title="Refresh">↻</button>
       </div>
       <div style="margin-bottom:.75rem">${urlList}</div>
       <div style="display:flex;flex-direction:column;gap:.35rem">

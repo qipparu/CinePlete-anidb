@@ -816,13 +816,19 @@ def letterboxd_get_movies():
     if not counts:
         return {"ok": True, "movies": [], "urls": urls, "url_status": url_status}
 
+    from app.scanner import load_snapshot
     t        = TMDB(api_key)
     wishlist = set(ov.get("wishlist_movies", []))
     ignored  = set(ov.get("ignore_movies", []))
+    owned    = load_snapshot()   # set of TMDB IDs already in the user's library
 
-    movies = []
+    movies      = []
+    owned_count = 0
     for tmdb_id, score in counts.most_common():
         if tmdb_id in ignored:
+            continue
+        if tmdb_id in owned:
+            owned_count += 1
             continue
         md = t.get(f"https://api.themoviedb.org/3/movie/{tmdb_id}?api_key={api_key}")
         if not md or md.get("success") is False:
@@ -841,11 +847,11 @@ def letterboxd_get_movies():
     movies.sort(key=lambda m: (-m["score"], -(m["rating"] or 0)))
 
     return {
-        "ok":         True,
-        "movies":     movies,
-        "urls":       urls,
-        "raw_count":  sum(counts.values()),   # total appearances across all lists (debug)
-        "unique":     len(counts),            # unique TMDB IDs found before enrichment
+        "ok":          True,
+        "movies":      movies,
+        "urls":        urls,
+        "unique":      len(counts),    # unique TMDB IDs found (before owned/ignored filter)
+        "owned_count": owned_count,    # how many were hidden because already in library
     }
 
 
