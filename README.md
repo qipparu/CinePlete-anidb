@@ -205,10 +205,54 @@ Fix: Refresh metadata or fix match manually in Plex.
 Permanently ignore franchises, directors, actors, or specific movies via UI buttons.
 Ignored items are excluded from all lists and charts.
 
+**Movie-level ignore** — every movie card now has a 🚫 button. Ignored movies appear in a dedicated **Ignored** tab where they can be restored with one click. Metadata (title, year, poster) is stored so the Ignored tab displays properly even before a rescan.
+
 Stored in:
 
 ```
 data/overrides.json
+```
+
+---
+
+### Letterboxd Tab
+
+Import and browse movies from any public Letterboxd URL — watchlists, named lists, diary feeds, or curator profile RSS feeds.
+
+**Features:**
+- Add multiple URLs — each is fetched and merged into a single scored grid
+- Movies appearing in more than one list get a **×N** badge and are sorted to the top
+- Movies already in your library are automatically filtered out
+- ↻ refresh button to re-fetch all lists on demand
+- URLs are persisted in `overrides.json` and survive container restarts
+
+**Supported URL formats:**
+
+| URL | RSS used |
+|-----|----------|
+| `letterboxd.com/you/watchlist/` | `/watchlist/rss/` |
+| `letterboxd.com/you/list/my-list/` | `/list/my-list/rss/` |
+| `letterboxd.com/you/rss/` | used as-is (diary) |
+| `letterboxd.com/you/films/` | falls back to diary `/rss/` |
+| curator profile RSS (e.g. `/mscorsese/rss/`) | auto-expanded — each linked list's RSS is fetched individually |
+
+> All lists must be public. Private Letterboxd accounts or patron-only lists are not accessible.
+
+---
+
+### FlareSolverr Integration
+
+Some Letterboxd list RSS feeds are protected by Cloudflare (403). If you run [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) in your stack, CinePlete will automatically route blocked requests through it.
+
+Configure the URL in **Config → FlareSolverr** (e.g. `http://flaresolverr:8191`). When a direct fetch returns 403, CinePlete retries via FlareSolverr transparently — no changes needed to your Letterboxd URLs.
+
+```yaml
+flaresolverr:
+  image: ghcr.io/flaresolverr/flaresolverr:latest
+  container_name: flaresolverr
+  ports:
+    - "8191:8191"
+  restart: unless-stopped
 ```
 
 ---
@@ -477,6 +521,7 @@ All persistent data lives in the mounted `/data` volume and survives container u
 | GET | `/api/config/status` | Returns `{configured: bool}` |
 | POST | `/api/ignore` | Ignores a movie / franchise / director / actor |
 | POST | `/api/unignore` | Removes an ignore |
+| GET | `/api/ignored` | Returns ignored movies with title/year/poster metadata |
 | POST | `/api/wishlist/add` | Adds a movie to wishlist |
 | POST | `/api/wishlist/remove` | Removes from wishlist |
 | POST | `/api/radarr/add` | Sends a movie to Radarr |
@@ -486,6 +531,10 @@ All persistent data lives in the mounted `/data` volume and survives container u
 | GET | `/api/auth/status` | Returns current auth mode and login state |
 | POST | `/api/auth/login` | Authenticates with username + password |
 | POST | `/api/auth/logout` | Clears the session cookie |
+| GET | `/api/letterboxd/urls` | Returns saved Letterboxd URLs |
+| POST | `/api/letterboxd/urls` | Adds a Letterboxd URL |
+| POST | `/api/letterboxd/urls/remove` | Removes a Letterboxd URL |
+| GET | `/api/letterboxd/movies` | Fetches, merges and scores all saved Letterboxd lists |
 
 ---
 
@@ -663,6 +712,26 @@ Correction : Actualiser les métadonnées ou corriger manuellement.
 
 Ignorer définitivement des sagas, réalisateurs, acteurs ou films via les boutons de l'interface.
 Les éléments ignorés sont exclus des listes et des graphiques.
+
+**Ignore par film** — chaque carte film dispose d'un bouton 🚫. Les films ignorés apparaissent dans un onglet **Ignored** dédié avec possibilité de restauration en un clic.
+
+---
+
+### Onglet Letterboxd
+
+Importez et parcourez les films depuis n'importe quelle URL Letterboxd publique — watchlists, listes nommées, journaux ou flux RSS de profil curateur.
+
+- Ajoutez plusieurs URLs — elles sont fusionnées en une grille scorée
+- Les films présents dans plusieurs listes affichent un badge **×N** et remontent en tête
+- Les films déjà dans votre bibliothèque sont automatiquement filtrés
+- Bouton ↻ pour rafraîchir toutes les listes
+- Les URLs sont sauvegardées dans `overrides.json`
+
+---
+
+### Intégration FlareSolverr
+
+Certains flux RSS Letterboxd sont protégés par Cloudflare. Si vous utilisez [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr), configurez l'URL dans **Config → FlareSolverr** (ex. `http://flaresolverr:8191`). Les requêtes bloquées (403) sont automatiquement reroutées.
 
 ---
 
