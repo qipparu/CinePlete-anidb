@@ -71,11 +71,53 @@ function updateBatchBar() {
     bar.classList.add("visible")
     const ovsBtn = document.getElementById("batchOverseerr")
     const jssBtn = document.getElementById("batchJellyseerr")
+    const wlBtn  = document.getElementById("batchWishlist")
     if (ovsBtn) ovsBtn.style.display = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED   ? "" : "none"
     if (jssBtn) jssBtn.style.display = CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED ? "" : "none"
+    // On Wishlist tab: swap "Add to Wishlist" → "Remove from Wishlist"
+    if (wlBtn) {
+      if (ACTIVE_TAB === "wishlist") {
+        wlBtn.textContent = "✕ Remove from Wishlist"
+        wlBtn.classList.remove("btn-wishlist")
+        wlBtn.classList.add("btn-ignore")
+      } else {
+        wlBtn.textContent = "☆ Wishlist"
+        wlBtn.classList.add("btn-wishlist")
+        wlBtn.classList.remove("btn-ignore")
+      }
+    }
   } else {
     bar.classList.remove("visible")
   }
+}
+
+function batchWishlistAction() {
+  if (ACTIVE_TAB === "wishlist") batchRemoveFromWishlist()
+  else batchAddToWishlist()
+}
+
+async function batchRemoveFromWishlist() {
+  const n = _selected.size
+  for (const [tmdb] of _selected) {
+    await api("/api/wishlist/remove", "POST", { tmdb })
+    // Remove card from DOM immediately
+    document.querySelector(`.pc[data-tmdb="${tmdb}"]`)?.remove()
+  }
+  toast(`${n} movie${n !== 1 ? "s" : ""} removed from Wishlist`, "gold")
+  clearSelection()
+}
+
+async function batchIgnoreMovies() {
+  const n = _selected.size
+  for (const [tmdb, m] of _selected) {
+    await api("/api/ignore", "POST", {
+      kind: "movie", tmdb_id: tmdb,
+      title: m.title, year: m.year, poster: m.poster,
+    })
+    document.querySelector(`.pc[data-tmdb="${tmdb}"]`)?.remove()
+  }
+  toast(`${n} movie${n !== 1 ? "s" : ""} ignored`, "gold")
+  clearSelection()
 }
 
 async function batchAddToRadarr() {
@@ -156,7 +198,7 @@ function posterCard(m, extraTag = "") {
     .replace(/'/g, "\\'")
 
   return `
-  <div class="pc" onclick="openMovieModal(${tmdb},${mSafe.replace(/"/g,'&quot;')})">
+  <div class="pc" data-tmdb="${tmdb}" onclick="openMovieModal(${tmdb},${mSafe.replace(/"/g,'&quot;')})">
     <input type="checkbox" class="pc-check"
       onclick="event.stopPropagation();toggleSelect(${tmdb},${mSafe.replace(/"/g,'&quot;')},this)"
       title="Select"/>
@@ -749,7 +791,7 @@ function renderSuggestions(){
 
 /* ── Wishlist ────────────────────────────────────────────── */
 
-function renderWishlist(){
+async function renderWishlist(){
   const c    = document.getElementById("content")
   const list = applyFilters(DATA.wishlist||[])
 
@@ -757,8 +799,26 @@ function renderWishlist(){
     c.innerHTML = emptyStateHTML("Wishlist is empty")
     return
   }
+
+  // Fetch Radarr sync status (non-blocking — falls back gracefully)
+  let radarrStatuses = {}
+  if (CONFIG?.RADARR?.RADARR_ENABLED) {
+    try {
+      const res = await api("/api/radarr/status")
+      if (res.ok) radarrStatuses = res.statuses || {}
+    } catch (_) {}
+  }
+
   const { slice, btn } = _paginate(list, "wishlist")
-  c.innerHTML = `<div class="grid-posters">${slice.map(m=>posterCard(m)).join("")}</div>${btn}`
+  c.innerHTML = `<div class="grid-posters">${slice.map(m => {
+    const s = radarrStatuses[m.tmdb]
+    const badge = s === "available"
+      ? `<span style="background:var(--radarr,#7B2FBE);color:#fff;font-size:.58rem;padding:1px 5px;border-radius:3px;vertical-align:middle">✓ In Radarr</span>`
+      : s === "monitored"
+      ? `<span style="background:var(--gold);color:#000;font-size:.58rem;padding:1px 5px;border-radius:3px;vertical-align:middle">⬇ Searching</span>`
+      : ""
+    return posterCard(m, badge)
+  }).join("")}</div>${btn}`
 }
 
 /* ── Letterboxd tab ──────────────────────────────────────── */
