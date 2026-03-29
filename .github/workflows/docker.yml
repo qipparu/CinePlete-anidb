@@ -25,7 +25,6 @@ on:
 permissions:
   contents: write
   security-events: write
-  workflows: write
 
 jobs:
   # ─────────────────────────────────────────────
