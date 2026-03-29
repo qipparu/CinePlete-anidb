@@ -10,6 +10,8 @@ COPY app /app/app
 COPY static /app/static
 COPY config /app/config
 
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 EXPOSE 8787
