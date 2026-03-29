@@ -111,7 +111,7 @@ async function batchIgnoreMovies() {
   const n = _selected.size
   for (const [tmdb, m] of _selected) {
     await api("/api/ignore", "POST", {
-      kind: "movie", tmdb_id: tmdb,
+      kind: "movie", value: tmdb,
       title: m.title, year: m.year, poster: m.poster,
     })
     document.querySelector(`.pc[data-tmdb="${tmdb}"]`)?.remove()
