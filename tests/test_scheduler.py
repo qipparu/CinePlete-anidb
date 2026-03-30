@@ -77,22 +77,16 @@ class TestGetLastScanCount:
 
 class TestGetPlexMovieCount:
 
-    def test_returns_none_when_config_missing(self, monkeypatch):
+    def test_returns_none_when_config_missing(self):
         import app.scheduler as sch
-        monkeypatch.setattr(
-            "app.scheduler.load_config",
-            lambda: {"PLEX": {"PLEX_URL": "", "PLEX_TOKEN": "", "LIBRARY_NAME": ""}}
-        )
-        assert sch._get_plex_movie_count() is None
+        lib = {"url": "", "token": "", "library_name": ""}
+        assert sch._get_plex_movie_count(lib) is None
 
     def test_returns_none_on_connection_error(self, monkeypatch):
         import app.scheduler as sch
         import requests
-        monkeypatch.setattr(
-            "app.scheduler.load_config",
-            lambda: {"PLEX": {"PLEX_URL": "http://fake", "PLEX_TOKEN": "tok", "LIBRARY_NAME": "Movies"}}
-        )
         def raise_error(*a, **k):
             raise requests.exceptions.ConnectionError("unreachable")
         monkeypatch.setattr("requests.get", raise_error)
-        assert sch._get_plex_movie_count() is None
+        lib = {"url": "http://fake", "token": "tok", "library_name": "Movies"}
+        assert sch._get_plex_movie_count(lib) is None
