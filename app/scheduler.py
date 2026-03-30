@@ -20,7 +20,7 @@ from app.logger import get_logger
 
 log = get_logger(__name__)
 
-DATA_DIR        = "/data"
+DATA_DIR        = os.getenv("DATA_DIR", "/data")
 RESULTS_FILE    = f"{DATA_DIR}/results.json"
 OVERRIDES_FILE  = f"{DATA_DIR}/overrides.json"
 GRAB_SEEN_FILE  = f"{DATA_DIR}/radarr_grab_seen.json"
@@ -29,14 +29,12 @@ MAX_SEEN_IDS    = 500
 _scheduler = None
 
 
-def _get_plex_movie_count() -> int | None:
-    """Return total movie count from Plex or None on error."""
+def _get_plex_movie_count(lib: dict) -> int | None:
+    """Return total movie count for a single Plex library config or None on error."""
     try:
-        cfg      = load_config()
-        plex_cfg = cfg["PLEX"]
-        url      = plex_cfg["PLEX_URL"]
-        token    = plex_cfg["PLEX_TOKEN"]
-        library  = plex_cfg["LIBRARY_NAME"]
+        url     = lib.get("url", "").rstrip("/")
+        token   = lib.get("token", "")
+        library = lib.get("library_name", "")
 
         if not all([url, token, library]):
             return None
@@ -78,19 +76,16 @@ def _get_plex_movie_count() -> int | None:
         return None
 
 
-def _get_jellyfin_movie_count() -> int | None:
-    """Return total movie count from Jellyfin or None on error."""
+def _get_jellyfin_movie_count(lib: dict) -> int | None:
+    """Return total movie count for a single Jellyfin library config or None on error."""
     try:
-        cfg    = load_config()
-        jf_cfg = cfg.get("JELLYFIN", {})
-        url    = jf_cfg.get("JELLYFIN_URL", "").rstrip("/")
-        token  = jf_cfg.get("JELLYFIN_API_KEY", "")
-        library = jf_cfg.get("JELLYFIN_LIBRARY_NAME", "Movies")
+        url     = lib.get("url", "").rstrip("/")
+        token   = lib.get("api_key", "")
+        library = lib.get("library_name", "Movies")
 
         if not all([url, token, library]):
             return None
 
-        # Get library ID
         r = requests.get(
             f"{url}/Library/MediaFolders",
             headers={"X-Emby-Token": token},
@@ -106,10 +101,9 @@ def _get_jellyfin_movie_count() -> int | None:
                 break
 
         if not lib_id:
-            log.warning(f"Jellyfin library '{library}' not found — check JELLYFIN_LIBRARY_NAME in config")
+            log.warning(f"Jellyfin library '{library}' not found — check library_name in config")
             return None
 
-        # Get count only — Limit=1 is enough to get TotalRecordCount
         r2 = requests.get(
             f"{url}/Items",
             headers={"X-Emby-Token": token},
@@ -127,6 +121,48 @@ def _get_jellyfin_movie_count() -> int | None:
     except Exception as e:
         log.debug(f"Jellyfin library poll error: {e}")
         return None
+
+
+def _get_total_movie_count(cfg: dict) -> int | None:
+    """
+    Sum movie counts across all enabled libraries.
+    Returns None if every library fails to respond.
+    Falls back to legacy flat config if LIBRARIES is empty.
+    """
+    libraries    = cfg.get("LIBRARIES", [])
+    enabled_libs = [l for l in libraries if l.get("enabled", True)]
+
+    if enabled_libs:
+        total = 0
+        any_ok = False
+        for lib in enabled_libs:
+            lib_type = lib.get("type", "plex").lower()
+            count = (_get_jellyfin_movie_count(lib)
+                     if lib_type == "jellyfin"
+                     else _get_plex_movie_count(lib))
+            if count is not None:
+                total += count
+                any_ok = True
+        return total if any_ok else None
+
+    # Legacy fallback
+    media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
+    plex_cfg = cfg.get("PLEX", {})
+    jf_cfg   = cfg.get("JELLYFIN", {})
+    if media_server == "jellyfin":
+        legacy_lib = {
+            "url": jf_cfg.get("JELLYFIN_URL", ""),
+            "api_key": jf_cfg.get("JELLYFIN_API_KEY", ""),
+            "library_name": jf_cfg.get("JELLYFIN_LIBRARY_NAME", "Movies"),
+        }
+        return _get_jellyfin_movie_count(legacy_lib)
+    else:
+        legacy_lib = {
+            "url": plex_cfg.get("PLEX_URL", ""),
+            "token": plex_cfg.get("PLEX_TOKEN", ""),
+            "library_name": plex_cfg.get("LIBRARY_NAME", ""),
+        }
+        return _get_plex_movie_count(legacy_lib)
 
 
 def _get_last_scan_count() -> int | None:
@@ -263,24 +299,8 @@ def _poll():
         log.debug("Library poll skipped — scan already running")
         return
 
-    cfg = load_config()
-    libraries    = cfg.get("LIBRARIES", [])
-    enabled_libs = [l for l in libraries if l.get("enabled", True)]
-    first_lib    = enabled_libs[0] if enabled_libs else None
-
-    if first_lib:
-        lib_type = first_lib.get("type", "plex").lower()
-        if lib_type == "jellyfin":
-            current = _get_jellyfin_movie_count()
-        else:
-            current = _get_plex_movie_count()
-    else:
-        # Fall back to legacy MEDIA_SERVER setting
-        media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
-        if media_server == "jellyfin":
-            current = _get_jellyfin_movie_count()
-        else:
-            current = _get_plex_movie_count()
+    cfg     = load_config()
+    current = _get_total_movie_count(cfg)
     if current is None:
         log.debug("Library poll: could not reach media server")
         return

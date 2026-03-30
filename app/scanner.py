@@ -46,11 +46,12 @@ STEPS = [
 ]
 
 
-def _set_step(index: int, detail: str = ""):
-    scan_state["step"]       = STEPS[index]
+def _set_step(index: int, detail: str = "", label: str = ""):
+    step_label = label or STEPS[index]
+    scan_state["step"]       = step_label
     scan_state["step_index"] = index + 1
     scan_state["detail"]     = detail
-    log.info(f"[{index + 1}/{len(STEPS)}] {STEPS[index]}{' — ' + detail if detail else ''}")
+    log.info(f"[{index + 1}/{len(STEPS)}] {step_label}{' — ' + detail if detail else ''}")
 
 
 # --------------------------------------------------
@@ -540,8 +541,8 @@ def build():
         f"{l.get('type','plex').title()} ({l.get('library_name','?')})"
         for l in enabled_libs
     )
-    STEPS[1] = f"Scanning {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}"
-    _set_step(1, lib_labels)
+    _set_step(1, lib_labels,
+              label=f"Scanning {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}")
 
     def _scan_one(lib):
         lib_type = lib.get("type", "plex").lower()
