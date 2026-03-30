@@ -264,11 +264,23 @@ def _poll():
         return
 
     cfg = load_config()
-    media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
-    if media_server == "jellyfin":
-        current = _get_jellyfin_movie_count()
+    libraries    = cfg.get("LIBRARIES", [])
+    enabled_libs = [l for l in libraries if l.get("enabled", True)]
+    first_lib    = enabled_libs[0] if enabled_libs else None
+
+    if first_lib:
+        lib_type = first_lib.get("type", "plex").lower()
+        if lib_type == "jellyfin":
+            current = _get_jellyfin_movie_count()
+        else:
+            current = _get_plex_movie_count()
     else:
-        current = _get_plex_movie_count()
+        # Fall back to legacy MEDIA_SERVER setting
+        media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
+        if media_server == "jellyfin":
+            current = _get_jellyfin_movie_count()
+        else:
+            current = _get_plex_movie_count()
     if current is None:
         log.debug("Library poll: could not reach media server")
         return
@@ -312,8 +324,7 @@ def start(interval_minutes: int):
             id="library_poll",
             replace_existing=True,
         )
-        media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
-        log.info(f"Library polling started — watching {media_server} every {interval_minutes} minute(s)")
+        log.info(f"Library polling started — checking every {interval_minutes} minute(s)")
 
     if schedule == "daily":
         _scheduler.add_job(

@@ -335,6 +335,50 @@ def api_save_config(payload: dict = Body(...)):
 
 
 # --------------------------------------------------
+# Library test
+# --------------------------------------------------
+
+@app.post("/api/library/test")
+def library_test(payload: dict = Body(...)):
+    lib_type = payload.get("type", "plex").lower()
+    try:
+        if lib_type == "jellyfin":
+            import requests as _req
+            url = payload.get("url", "").rstrip("/")
+            key = payload.get("api_key", "")
+            lib = payload.get("library_name", "")
+            if not url or not key:
+                return {"ok": False, "error": "URL and API key are required"}
+            r = _req.get(f"{url}/Library/MediaFolders",
+                         headers={"X-Emby-Token": key}, timeout=10)
+            r.raise_for_status()
+            folders = [i.get("Name","") for i in r.json().get("Items",[])]
+            if lib and lib not in folders:
+                return {"ok": False, "error": f"Library '{lib}' not found. Available: {', '.join(folders)}"}
+            return {"ok": True, "libraries": folders}
+        else:
+            from app.plex_xml import plex_get
+            import defusedxml.ElementTree as _ET
+            url   = payload.get("url", "").rstrip("/")
+            token = payload.get("token", "")
+            lib   = payload.get("library_name", "")
+            if not url or not token:
+                return {"ok": False, "error": "URL and token are required"}
+            lib_cfg = {"url": url, "token": token, "library_name": lib,
+                       "page_size": 500, "short_movie_limit": 60}
+            xml  = plex_get("/library/sections", lib_cfg)
+            root = _ET.fromstring(xml)
+            libs = [d.attrib.get("title","") for d in root.findall("Directory")
+                    if d.attrib.get("type") == "movie"]
+            if lib and lib not in libs:
+                return {"ok": False, "error": f"Library '{lib}' not found. Available: {', '.join(libs)}"}
+            return {"ok": True, "libraries": libs}
+    except Exception as e:
+        log.debug(f"Library test failed: {e}")
+        return {"ok": False, "error": "Could not connect — check URL and credentials"}
+
+
+# --------------------------------------------------
 # Results  (FIX #2 — never blocks on first load)
 # --------------------------------------------------
 

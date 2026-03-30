@@ -121,16 +121,157 @@ async function testJellyfinConnection(){
   }
 }
 
-function toggleMediaServer(){
-  const val = document.getElementById("cfg_media_server")?.value
-  document.getElementById("plex-fields").style.display     = val === "plex"     ? "block" : "none"
-  document.getElementById("jellyfin-fields").style.display = val === "jellyfin" ? "block" : "none"
+// Build library entry HTML
+function _libEntryHtml(lib, idx) {
+  const isPlex = (lib.type || "plex") === "plex"
+  const typeBadge = isPlex
+    ? `<span style="background:#e5a00d;color:#000;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">PLEX</span>`
+    : `<span style="background:#7B2FBE;color:#fff;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">JELLYFIN</span>`
+
+  const credField = isPlex
+    ? `<div class="form-group" style="margin-bottom:.5rem">
+         <label class="form-label" style="font-size:.72rem">Token</label>
+         ${_secretInput(`lib_${idx}_cred`, lib.token||"")}
+       </div>`
+    : `<div class="form-group" style="margin-bottom:.5rem">
+         <label class="form-label" style="font-size:.72rem">API Key</label>
+         ${_secretInput(`lib_${idx}_cred`, lib.api_key||"")}
+       </div>`
+
+  return `
+  <div class="lib-entry" data-idx="${idx}" data-type="${lib.type||'plex'}"
+       style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+              padding:1rem 1.2rem;margin-bottom:.75rem">
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem">
+      ${typeBadge}
+      <input id="lib_${idx}_label" value="${escHtml(lib.label||"")}"
+        placeholder="${isPlex?"Plex":"Jellyfin"} library label"
+        style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--border2);
+               color:var(--text);font-family:'DM Mono',monospace;font-size:.82rem;
+               padding:2px 4px;outline:none"/>
+      <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.75rem;color:var(--text2);white-space:nowrap">
+        <input type="checkbox" id="lib_${idx}_enabled" ${lib.enabled?"checked":""}
+          style="width:14px;height:14px;accent-color:var(--gold);cursor:pointer"/>
+        Enable
+      </label>
+      <button onclick="removeLibEntry(${idx})"
+        style="background:none;border:none;color:var(--text3);cursor:pointer;
+               font-size:1rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Remove">&#x2715;</button>
+    </div>
+    <div class="form-group" style="margin-bottom:.5rem">
+      <label class="form-label" style="font-size:.72rem">URL</label>
+      <input id="lib_${idx}_url" type="url" value="${escHtml(lib.url||"")}"
+        placeholder="${isPlex?"http://plex:32400":"http://jellyfin:8096"}"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+               color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
+               padding:.4rem .65rem;box-sizing:border-box"/>
+    </div>
+    ${credField}
+    <div class="form-group" style="margin-bottom:.5rem">
+      <label class="form-label" style="font-size:.72rem">Library Name</label>
+      <input id="lib_${idx}_library" value="${escHtml(lib.library_name||"")}"
+        placeholder="${isPlex?"Movies":"Movies"}"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+               color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
+               padding:.4rem .65rem;box-sizing:border-box"/>
+    </div>
+    <div style="display:flex;align-items:center;gap:.5rem;margin-top:.25rem">
+      <button class="btn-sm" style="font-size:.72rem;padding:5px 14px"
+        onclick="testLibEntry(${idx})">Test Connection</button>
+      <span id="lib_${idx}_test" style="font-size:.72rem"></span>
+    </div>
+  </div>`
+}
+
+function _secretInput(id, val) {
+  return `<div style="position:relative;display:flex;align-items:center">
+    <input id="${id}" type="password" value="${escHtml(val)}"
+      style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+             color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
+             padding:.4rem 2.2rem .4rem .65rem;box-sizing:border-box"/>
+    <button type="button" onclick="this.previousElementSibling.type=this.previousElementSibling.type==='password'?'text':'password'"
+      style="position:absolute;right:.4rem;background:none;border:none;color:var(--text3);
+             cursor:pointer;font-size:.78rem;padding:2px">&#x1F441;</button>
+  </div>`
+}
+
+function addLibEntry(type) {
+  const idx = document.querySelectorAll(".lib-entry").length
+  const newLib = {
+    id: `${type}-${Date.now()}`,
+    type,
+    enabled: true,
+    label: "",
+    url: "",
+    token: "",
+    api_key: "",
+    library_name: type === "jellyfin" ? "Movies" : "",
+    page_size: 500,
+    short_movie_limit: 60,
+  }
+  const div = document.createElement("div")
+  div.innerHTML = _libEntryHtml(newLib, idx)
+  document.getElementById("lib-list").appendChild(div.firstElementChild)
+}
+
+function removeLibEntry(idx) {
+  document.querySelector(`.lib-entry[data-idx="${idx}"]`)?.remove()
+  // Re-index remaining entries
+  document.querySelectorAll(".lib-entry").forEach((el, i) => {
+    el.dataset.idx = i
+    el.querySelectorAll("[id]").forEach(inp => {
+      inp.id = inp.id.replace(/^lib_\d+_/, `lib_${i}_`)
+    })
+  })
+}
+
+async function testLibEntry(idx) {
+  const el      = document.querySelector(`.lib-entry[data-idx="${idx}"]`)
+  const type    = el?.dataset.type || "plex"
+  const url     = document.getElementById(`lib_${idx}_url`)?.value?.trim()
+  const cred    = document.getElementById(`lib_${idx}_cred`)?.value?.trim()
+  const lib     = document.getElementById(`lib_${idx}_library`)?.value?.trim()
+  const resEl   = document.getElementById(`lib_${idx}_test`)
+  if (!resEl) return
+  resEl.textContent = "Testing\u2026"
+  resEl.style.color = "var(--text3)"
+  const payload = type === "plex"
+    ? { type, url, token: cred, library_name: lib }
+    : { type, url, api_key: cred, library_name: lib }
+  const res = await api("/api/library/test", "POST", payload)
+  if (res.ok) {
+    resEl.textContent = "\u2713 Connected"
+    resEl.style.color = "var(--green)"
+  } else {
+    resEl.textContent = `\u2717 ${res.error || "Failed"}`
+    resEl.style.color = "var(--red,#ef4444)"
+  }
+}
+
+function _collectLibraries() {
+  return Array.from(document.querySelectorAll(".lib-entry")).map(el => {
+    const idx  = parseInt(el.dataset.idx)
+    const type = el.dataset.type || "plex"
+    const base = {
+      id:             `${type}-${idx}`,
+      type,
+      enabled:        document.getElementById(`lib_${idx}_enabled`)?.checked ?? true,
+      label:          document.getElementById(`lib_${idx}_label`)?.value?.trim() || "",
+      url:            document.getElementById(`lib_${idx}_url`)?.value?.trim() || "",
+      library_name:   document.getElementById(`lib_${idx}_library`)?.value?.trim() || "",
+      page_size:      500,
+      short_movie_limit: 60,
+    }
+    const cred = document.getElementById(`lib_${idx}_cred`)?.value?.trim() || ""
+    if (type === "plex") base.token   = cred
+    else                 base.api_key = cred
+    return base
+  })
 }
 
 function renderConfig(){
   const c     = document.getElementById("content")
   const cfg   = CONFIG||{}
-  const plex  = cfg.PLEX        ||{}
   const tmdb  = cfg.TMDB        ||{}
   const radarr= cfg.RADARR      ||{}
   const r4k   = cfg.RADARR_4K   ||{}
@@ -138,16 +279,12 @@ function renderConfig(){
   const act   = cfg.ACTOR_HITS  ||{}
   const auto  = cfg.AUTOMATION  ||{}
   const tg    = cfg.TELEGRAM    ||{}
-  const jf    = cfg.JELLYFIN    ||{}
-  const srv   = cfg.SERVER      ||{}
   const ovs   = cfg.OVERSEERR   ||{}
   const jss   = cfg.JELLYSEERR  ||{}
   const wh    = cfg.WEBHOOK     ||{}
   const wtch  = cfg.WATCHTOWER   ||{}
   const auth  = cfg.AUTH         ||{}
   const fsolv = cfg.FLARESOLVERR ||{}
-
-  const mediaServer = (srv.MEDIA_SERVER || "plex").toLowerCase()
 
   const field = (id, label, value, type="text") => {
     const isSecret  = type === "secret"
@@ -211,33 +348,20 @@ function renderConfig(){
           : hint("No password set yet. Enter one to enable login.")}
       </div>
 
-      <div class="form-section">
-        ${sec("Media Server")}
-        <div class="form-group">
-          <label class="form-label">Server Type</label>
-          <select id="cfg_media_server" onchange="toggleMediaServer()"
-            style="width:100%;background:var(--bg3);border:1px solid var(--border2);
-                   border-radius:8px;color:var(--text);font-family:'DM Mono',monospace;
-                   font-size:.82rem;padding:.55rem .85rem;outline:none">
-            <option value="plex"     ${mediaServer==="plex"     ?"selected":""}>Plex</option>
-            <option value="jellyfin" ${mediaServer==="jellyfin" ?"selected":""}>Jellyfin</option>
-          </select>
+      <div class="form-section" id="libraries-section">
+        ${sec("Libraries")}
+        <div id="lib-list">
+          ${(CONFIG.LIBRARIES||[]).map((lib, i) => _libEntryHtml(lib, i)).join("")}
         </div>
-        <div id="plex-fields" style="display:${mediaServer==="plex"?"block":"none"}">
-          ${field("cfg_plex_url",   "Plex URL",     plex.PLEX_URL    ||"")}
-          ${field("cfg_plex_token", "Plex Token",   plex.PLEX_TOKEN  ||"", "secret")}
-          ${field("cfg_library",    "Library Name", plex.LIBRARY_NAME||"")}
+        <div style="display:flex;gap:.5rem;margin-top:.5rem">
+          <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(229,160,13,.3);color:var(--gold)"
+            onclick="addLibEntry('plex')">+ Add Plex</button>
+          <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(123,47,190,.3);color:#9B5FDE"
+            onclick="addLibEntry('jellyfin')">+ Add Jellyfin</button>
         </div>
-        <div id="jellyfin-fields" style="display:${mediaServer==="jellyfin"?"block":"none"}">
-          ${field("cfg_jf_url",     "Jellyfin URL",  jf.JELLYFIN_URL          ||"")}
-          ${field("cfg_jf_key",     "API Key",        jf.JELLYFIN_API_KEY      ||"", "secret")}
-          ${field("cfg_jf_library", "Library Name",   jf.JELLYFIN_LIBRARY_NAME ||"Movies")}
-          <div style="display:flex;align-items:center;gap:.75rem;margin-top:.25rem">
-            <button class="btn-sm" style="font-size:.72rem;padding:5px 14px" onclick="testJellyfinConnection()">Test Connection</button>
-            <span id="jf-test-result" style="font-size:.72rem"></span>
-          </div>
-        </div>
-
+        <p style="font-size:.7rem;color:var(--text3);margin:.5rem 0 0">
+          All enabled libraries are scanned in parallel and merged by TMDB ID.
+        </p>
       </div>
 
       <div class="form-section">
@@ -262,9 +386,6 @@ function renderConfig(){
           ${sub("TMDB")}
           ${field("cfg_tmdb_workers","Concurrent workers (1–10)", tmdb.TMDB_WORKERS??6,"number")}
           ${hint("Higher = faster first scan. Default 6, max 10.")}
-          ${sub("Scanner")}
-          ${field("cfg_plex_page_size","Page size",               plex.PLEX_PAGE_SIZE   ??500, "number")}
-          ${field("cfg_short_limit",  "Short movie limit (min)", plex.SHORT_MOVIE_LIMIT??60,  "number")}
         </div>
       </details>
 
@@ -387,22 +508,31 @@ async function saveConfig(){
 
   const payload = {
     SERVER:{
-      MEDIA_SERVER: v("cfg_media_server"),
+      MEDIA_SERVER: (() => {
+        const libs = _collectLibraries()
+        const first = libs.find(l => l.enabled)
+        return first?.type || "plex"
+      })(),
     },
-    // For the inactive server, the fields are hidden (display:none) so their
-    // DOM inputs don't exist — fall back to last saved CONFIG values
-    PLEX:{
-      PLEX_URL:         document.getElementById("cfg_plex_url")    ? v("cfg_plex_url")    : (CONFIG?.PLEX?.PLEX_URL    ||""),
-      PLEX_TOKEN:       document.getElementById("cfg_plex_token")  ? v("cfg_plex_token")  : (CONFIG?.PLEX?.PLEX_TOKEN  ||""),
-      LIBRARY_NAME:     document.getElementById("cfg_library")     ? v("cfg_library")     : (CONFIG?.PLEX?.LIBRARY_NAME||""),
-      PLEX_PAGE_SIZE:   vi("cfg_plex_page_size") ?? CONFIG?.PLEX?.PLEX_PAGE_SIZE    ?? 500,
-      SHORT_MOVIE_LIMIT:vi("cfg_short_limit")    ?? CONFIG?.PLEX?.SHORT_MOVIE_LIMIT ?? 60,
-    },
-    JELLYFIN:{
-      JELLYFIN_URL:          document.getElementById("cfg_jf_url")     ? v("cfg_jf_url")     : (CONFIG?.JELLYFIN?.JELLYFIN_URL          ||""),
-      JELLYFIN_API_KEY:      document.getElementById("cfg_jf_key")     ? v("cfg_jf_key")     : (CONFIG?.JELLYFIN?.JELLYFIN_API_KEY      ||""),
-      JELLYFIN_LIBRARY_NAME: document.getElementById("cfg_jf_library") ? v("cfg_jf_library") : (CONFIG?.JELLYFIN?.JELLYFIN_LIBRARY_NAME ||"Movies"),
-    },
+    LIBRARIES: _collectLibraries(),
+    // Derive legacy PLEX/JELLYFIN from LIBRARIES for backward compat
+    PLEX: (() => {
+      const libs = _collectLibraries()
+      const p = libs.find(l => l.type === "plex")
+      return p ? {
+        PLEX_URL: p.url, PLEX_TOKEN: p.token, LIBRARY_NAME: p.library_name,
+        PLEX_PAGE_SIZE: p.page_size || 500, SHORT_MOVIE_LIMIT: p.short_movie_limit || 60,
+      } : (CONFIG?.PLEX || {})
+    })(),
+    JELLYFIN: (() => {
+      const libs = _collectLibraries()
+      const j = libs.find(l => l.type === "jellyfin")
+      return j ? {
+        JELLYFIN_URL: j.url, JELLYFIN_API_KEY: j.api_key,
+        JELLYFIN_LIBRARY_NAME: j.library_name,
+        JELLYFIN_PAGE_SIZE: j.page_size || 500, SHORT_MOVIE_LIMIT: j.short_movie_limit || 60,
+      } : (CONFIG?.JELLYFIN || {})
+    })(),
     TMDB:{
       TMDB_API_KEY: v("cfg_tmdb_key"),
       TMDB_WORKERS: vi("cfg_tmdb_workers"),

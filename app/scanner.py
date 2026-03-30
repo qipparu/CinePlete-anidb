@@ -528,19 +528,64 @@ def build():
     rec_fetched_ids   = set(overrides.get("rec_fetched_ids", []))
 
     # ---- MEDIA SERVER SCAN ------------------------------------
-    media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
-    if media_server == "jellyfin":
-        from app.jellyfin_api import scan_movies
-        STEPS[1] = "Scanning Jellyfin library"
-        log.info("Using Jellyfin scanner")
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from collections import defaultdict as _defaultdict
+
+    libraries    = cfg.get("LIBRARIES", [])
+    enabled_libs = [l for l in libraries if l.get("enabled", True)]
+    if not enabled_libs:
+        raise RuntimeError("No libraries enabled — enable at least one library in Config")
+
+    lib_labels = ", ".join(
+        f"{l.get('type','plex').title()} ({l.get('library_name','?')})"
+        for l in enabled_libs
+    )
+    STEPS[1] = f"Scanning {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}"
+    _set_step(1, lib_labels)
+
+    def _scan_one(lib):
+        lib_type = lib.get("type", "plex").lower()
+        label    = lib.get("label") or lib.get("library_name") or lib_type
+        log.info(f"Scanning {lib_type} library: {label}")
+        if lib_type == "jellyfin":
+            from app.jellyfin_api import scan_movies
+        else:
+            from app.plex_xml import scan_movies
+        return scan_movies(lib)
+
+    all_results = []
+    if len(enabled_libs) == 1:
+        all_results.append(_scan_one(enabled_libs[0]))
     else:
-        from app.plex_xml import scan_movies
-        STEPS[1] = "Scanning Plex library"
-        log.info("Using Plex scanner")
-    _set_step(1)
-    plex_ids, directors_map, actors_map, plex_stats, no_tmdb_guid = scan_movies()
-    duplicates = plex_stats.pop("duplicates", [])
-    log.info(f"Movies detected: {len(plex_ids)}, duplicates: {len(duplicates)}")
+        with ThreadPoolExecutor(max_workers=len(enabled_libs)) as ex:
+            futures = {ex.submit(_scan_one, lib): lib for lib in enabled_libs}
+            for fut in as_completed(futures):
+                all_results.append(fut.result())
+
+    # Merge — deduplicate movies by TMDB ID across libraries
+    plex_ids     = {}
+    directors_map = _defaultdict(set)
+    actors_map    = _defaultdict(set)
+    no_tmdb_guid  = []
+    duplicates    = []
+    plex_stats    = {}
+
+    for ids, dirs, acts, stats, no_guid in all_results:
+        plex_ids.update(ids)
+        for name, tmdb_ids in dirs.items():
+            directors_map[name].update(tmdb_ids)
+        for name, tmdb_ids in acts.items():
+            actors_map[name].update(tmdb_ids)
+        no_tmdb_guid.extend(no_guid)
+        duplicates.extend(stats.pop("duplicates", []))
+        for k, v in stats.items():
+            plex_stats[k] = plex_stats.get(k, 0) + v if isinstance(v, int) else v
+
+    # Re-apply the "appeared in 2+ films" filter after merging
+    directors_map = {k: v for k, v in directors_map.items() if len(v) > 1}
+    actors_map    = {k: v for k, v in actors_map.items()    if len(v) > 1}
+
+    log.info(f"Merged: {len(plex_ids)} movies from {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}, {len(duplicates)} duplicates")
 
     # ---- PROGRESSIVE SCAN CHECK --------------------------------
     snapshot_ids = load_snapshot()
