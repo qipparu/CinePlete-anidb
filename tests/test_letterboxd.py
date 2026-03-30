@@ -45,7 +45,7 @@ def _tmp_overrides(**extra):
 class TestParseFilmsFromHtml:
 
     def _call(self, html):
-        from app.web import _parse_films_from_html
+        from app.routers.letterboxd import _parse_films_from_html
         return _parse_films_from_html(html)
 
     def test_extracts_film_titles(self):
@@ -97,7 +97,7 @@ class TestParseFilmsFromHtml:
 class TestFetchViaFlaresolverr:
 
     def _call(self, rss_url, fs_url):
-        from app.web import _fetch_via_flaresolverr
+        from app.routers.letterboxd import _fetch_via_flaresolverr
         return _fetch_via_flaresolverr(rss_url, fs_url)
 
     def test_returns_content_on_success(self):
@@ -146,7 +146,7 @@ class TestFetchLetterboxdRssUrls:
             r.status_code = 404   # abort early, we just want the URL
             return r
         with patch("requests.get", side_effect=fake_get):
-            from app.web import _fetch_letterboxd_rss
+            from app.routers.letterboxd import _fetch_letterboxd_rss
             _fetch_letterboxd_rss(input_url)
         return captured.get("url")
 
@@ -187,12 +187,17 @@ _BASE_CFG = {
 def _client_ctx(overrides_path):
     """Context manager yielding a TestClient with OVERRIDES_FILE patched."""
     from contextlib import contextmanager
+    import app.routers.overrides as _overrides_mod
+    import app.routers.letterboxd as _lb_mod
 
     @contextmanager
     def _ctx():
         client = TestClient(_app, raise_server_exceptions=True)
-        with patch.object(_web_module, "OVERRIDES_FILE", overrides_path), \
-             patch("app.web.load_config", return_value=_BASE_CFG):
+        with patch.object(_overrides_mod, "OVERRIDES_FILE", overrides_path), \
+             patch.object(_lb_mod, "OVERRIDES_FILE", overrides_path), \
+             patch("app.web.load_config", return_value=_BASE_CFG), \
+             patch("app.routers.config.load_config", return_value=_BASE_CFG), \
+             patch("app.routers.letterboxd.load_config", return_value=_BASE_CFG):
             yield client
 
     return _ctx()

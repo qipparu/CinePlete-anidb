@@ -51,11 +51,18 @@ def _mock_response(status_code=200, json_data=None):
     return mock
 
 
+# Helper: patch both the middleware's load_config (app.web) and the router's
+_mw = "app.web.load_config"
+_rt = "app.routers.integrations.load_config"
+_rq = "app.routers.integrations.requests.get"
+
+
 class TestRadarrProfilesPrimary:
 
     def test_returns_profiles_primary(self):
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", return_value=_mock_response()) as mock_get:
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, return_value=_mock_response()) as mock_get:
             res = client.get("/api/radarr/profiles?instance=primary")
         assert res.status_code == 200
         data = res.json()
@@ -69,14 +76,16 @@ class TestRadarrProfilesPrimary:
         )
 
     def test_default_instance_is_primary(self):
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", return_value=_mock_response()):
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, return_value=_mock_response()):
             res = client.get("/api/radarr/profiles")
         assert res.json()["ok"] is True
 
     def test_returns_profiles_4k(self):
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", return_value=_mock_response()) as mock_get:
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, return_value=_mock_response()) as mock_get:
             res = client.get("/api/radarr/profiles?instance=4k")
         assert res.status_code == 200
         assert res.json()["ok"] is True
@@ -87,8 +96,9 @@ class TestRadarrProfilesPrimary:
         )
 
     def test_profile_names_and_ids_mapped(self):
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", return_value=_mock_response()):
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, return_value=_mock_response()):
             res = client.get("/api/radarr/profiles")
         profiles = res.json()["profiles"]
         ids   = [p["id"]   for p in profiles]
@@ -101,7 +111,7 @@ class TestRadarrProfilesErrorCases:
 
     def test_missing_url_returns_error(self):
         cfg = {**BASE_CFG, "RADARR": {**BASE_CFG["RADARR"], "RADARR_URL": ""}}
-        with patch("app.web.load_config", return_value=cfg):
+        with patch(_mw, return_value=cfg), patch(_rt, return_value=cfg):
             res = client.get("/api/radarr/profiles")
         data = res.json()
         assert data["ok"] is False
@@ -109,30 +119,32 @@ class TestRadarrProfilesErrorCases:
 
     def test_missing_api_key_returns_error(self):
         cfg = {**BASE_CFG, "RADARR": {**BASE_CFG["RADARR"], "RADARR_API_KEY": ""}}
-        with patch("app.web.load_config", return_value=cfg):
+        with patch(_mw, return_value=cfg), patch(_rt, return_value=cfg):
             res = client.get("/api/radarr/profiles")
         data = res.json()
         assert data["ok"] is False
 
     def test_invalid_url_scheme_returns_error(self):
         cfg = {**BASE_CFG, "RADARR": {**BASE_CFG["RADARR"], "RADARR_URL": "ftp://radarr:7878"}}
-        with patch("app.web.load_config", return_value=cfg):
+        with patch(_mw, return_value=cfg), patch(_rt, return_value=cfg):
             res = client.get("/api/radarr/profiles")
         data = res.json()
         assert data["ok"] is False
         assert "Invalid" in data["error"]
 
     def test_401_invalid_api_key(self):
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", return_value=_mock_response(status_code=401)):
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, return_value=_mock_response(status_code=401)):
             res = client.get("/api/radarr/profiles")
         data = res.json()
         assert data["ok"] is False
         assert "API key" in data["error"]
 
     def test_non_200_http_error(self):
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", return_value=_mock_response(status_code=503)):
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, return_value=_mock_response(status_code=503)):
             res = client.get("/api/radarr/profiles")
         data = res.json()
         assert data["ok"] is False
@@ -140,8 +152,9 @@ class TestRadarrProfilesErrorCases:
 
     def test_network_error(self):
         import requests as req_lib
-        with patch("app.web.load_config", return_value=BASE_CFG), \
-             patch("app.web.requests.get", side_effect=req_lib.exceptions.ConnectionError("refused")):
+        with patch(_mw, return_value=BASE_CFG), \
+             patch(_rt, return_value=BASE_CFG), \
+             patch(_rq, side_effect=req_lib.exceptions.ConnectionError("refused")):
             res = client.get("/api/radarr/profiles")
         data = res.json()
         assert data["ok"] is False
@@ -149,6 +162,6 @@ class TestRadarrProfilesErrorCases:
 
     def test_missing_4k_url_returns_error(self):
         cfg = {**BASE_CFG, "RADARR_4K": {**BASE_CFG["RADARR_4K"], "RADARR_4K_URL": ""}}
-        with patch("app.web.load_config", return_value=cfg):
+        with patch(_mw, return_value=cfg), patch(_rt, return_value=cfg):
             res = client.get("/api/radarr/profiles?instance=4k")
         assert res.json()["ok"] is False
