@@ -7,7 +7,7 @@ import pytest
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from app.config import _deep_merge, is_configured, DEFAULT_CONFIG
+from app.config import _deep_merge, _migrate_libraries, is_configured, DEFAULT_CONFIG
 
 
 # ─────────────────────────────────────────────
@@ -74,6 +74,26 @@ class TestIsConfigured:
         cfg["TMDB"]["TMDB_API_KEY"] = api_key
         return cfg
 
+    def _cfg_with_libraries(self, lib_type="plex", url="", cred="", library="", api_key=""):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["TMDB"]["TMDB_API_KEY"] = api_key
+        lib = {
+            "id": f"{lib_type}-0",
+            "type": lib_type,
+            "enabled": True,
+            "label": lib_type.title(),
+            "url": url,
+            "library_name": library,
+            "page_size": 500,
+            "short_movie_limit": 60,
+        }
+        if lib_type == "jellyfin":
+            lib["api_key"] = cred
+        else:
+            lib["token"] = cred
+        cfg["LIBRARIES"] = [lib]
+        return cfg
+
     def test_all_fields_set_returns_true(self):
         cfg = self._cfg("http://plex", "token123", "Movies", "tmdb_key")
         assert is_configured(cfg) is True
@@ -100,6 +120,90 @@ class TestIsConfigured:
 
     def test_default_config_not_configured(self):
         assert is_configured(copy.deepcopy(DEFAULT_CONFIG)) is False
+
+    def test_libraries_plex_entry_returns_true(self):
+        cfg = self._cfg_with_libraries("plex", "http://plex", "token123", "Movies", "tmdb_key")
+        assert is_configured(cfg) is True
+
+    def test_libraries_jellyfin_entry_returns_true(self):
+        cfg = self._cfg_with_libraries("jellyfin", "http://jf", "apikey123", "Movies", "tmdb_key")
+        assert is_configured(cfg) is True
+
+    def test_libraries_disabled_entry_returns_false(self):
+        cfg = self._cfg_with_libraries("plex", "http://plex", "token123", "Movies", "tmdb_key")
+        cfg["LIBRARIES"][0]["enabled"] = False
+        # No legacy flat config set — should fall back to legacy check and fail
+        assert is_configured(cfg) is False
+
+    def test_empty_libraries_falls_back_to_legacy(self):
+        cfg = self._cfg("http://plex", "token123", "Movies", "tmdb_key")
+        cfg["LIBRARIES"] = []
+        assert is_configured(cfg) is True
+
+
+# ─────────────────────────────────────────────
+# _migrate_libraries
+# ─────────────────────────────────────────────
+
+class TestMigrateLibraries:
+
+    def test_migrates_plex_config(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["PLEX"]["PLEX_URL"]     = "http://plex:32400"
+        cfg["PLEX"]["PLEX_TOKEN"]   = "mytoken"
+        cfg["PLEX"]["LIBRARY_NAME"] = "Movies"
+        cfg["SERVER"]["MEDIA_SERVER"] = "plex"
+        result = _migrate_libraries(cfg)
+        libs = result["LIBRARIES"]
+        assert len(libs) == 1
+        lib = libs[0]
+        assert lib["type"]         == "plex"
+        assert lib["url"]          == "http://plex:32400"
+        assert lib["token"]        == "mytoken"
+        assert lib["library_name"] == "Movies"
+        assert lib["enabled"]      is True
+
+    def test_migrates_jellyfin_config(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["JELLYFIN"]["JELLYFIN_URL"]          = "http://jf:8096"
+        cfg["JELLYFIN"]["JELLYFIN_API_KEY"]      = "jfkey"
+        cfg["JELLYFIN"]["JELLYFIN_LIBRARY_NAME"] = "Films"
+        cfg["SERVER"]["MEDIA_SERVER"] = "jellyfin"
+        result = _migrate_libraries(cfg)
+        libs = result["LIBRARIES"]
+        assert len(libs) == 1
+        lib = libs[0]
+        assert lib["type"]         == "jellyfin"
+        assert lib["url"]          == "http://jf:8096"
+        assert lib["api_key"]      == "jfkey"
+        assert lib["library_name"] == "Films"
+        assert lib["enabled"]      is True
+
+    def test_no_migration_when_libraries_already_set(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["PLEX"]["PLEX_URL"] = "http://plex:32400"
+        existing_lib = {"id": "plex-custom", "type": "plex", "enabled": True,
+                        "url": "http://other", "token": "t", "library_name": "Other"}
+        cfg["LIBRARIES"] = [existing_lib]
+        result = _migrate_libraries(cfg)
+        # Should not overwrite existing LIBRARIES
+        assert result["LIBRARIES"] == [existing_lib]
+
+    def test_no_migration_when_empty_plex_config(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        result = _migrate_libraries(cfg)
+        # No PLEX_URL or PLEX_TOKEN set, so no migration
+        assert result["LIBRARIES"] == []
+
+    def test_plex_disabled_when_media_server_is_jellyfin(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["PLEX"]["PLEX_URL"]   = "http://plex:32400"
+        cfg["PLEX"]["PLEX_TOKEN"] = "mytoken"
+        cfg["SERVER"]["MEDIA_SERVER"] = "jellyfin"
+        result = _migrate_libraries(cfg)
+        libs = result["LIBRARIES"]
+        assert len(libs) == 1
+        assert libs[0]["enabled"] is False
 
 
 # ─────────────────────────────────────────────

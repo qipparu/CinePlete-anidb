@@ -1,4 +1,5 @@
 import copy
+import ipaddress
 import os
 import time
 from collections import Counter
@@ -33,6 +34,40 @@ LETTERBOXD_CACHE_FILE = f"{DATA_DIR}/letterboxd_cache.json"
 APP_VERSION  = os.getenv("APP_VERSION", "dev")
 STATIC_DIR   = os.getenv("STATIC_DIR", "/app/static")
 GITHUB_REPO = "sdblepas/CinePlete"
+
+
+def _parse_tmdb_id(value) -> int | None:
+    """Return int TMDB ID or None if value is missing / non-numeric."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_url_for_fetch(url: str) -> str | None:
+    """
+    Return an error string if url should not be fetched (SSRF guard).
+    Returns None when the URL is safe.
+    Allows only http/https to public IP addresses.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return "Only http/https URLs are allowed"
+        hostname = parsed.hostname or ""
+        if not hostname:
+            return "Missing hostname"
+        try:
+            addr = ipaddress.ip_address(hostname)
+            if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+                return "Private/internal IP addresses are not allowed"
+        except ValueError:
+            # hostname is a domain name — check for localhost explicitly
+            if hostname.lower() in ("localhost", "localhost.localdomain"):
+                return "localhost is not allowed"
+        return None
+    except Exception:
+        return "Invalid URL"
 
 # Simple in-memory cache for GitHub release check (avoid hammering the API)
 _release_cache: dict = {"checked_at": 0, "latest": None, "url": None}
@@ -335,6 +370,50 @@ def api_save_config(payload: dict = Body(...)):
 
 
 # --------------------------------------------------
+# Library test
+# --------------------------------------------------
+
+@app.post("/api/library/test")
+def library_test(payload: dict = Body(...)):
+    lib_type = payload.get("type", "plex").lower()
+    try:
+        if lib_type == "jellyfin":
+            import requests as _req
+            url = payload.get("url", "").rstrip("/")
+            key = payload.get("api_key", "")
+            lib = payload.get("library_name", "")
+            if not url or not key:
+                return {"ok": False, "error": "URL and API key are required"}
+            r = _req.get(f"{url}/Library/MediaFolders",
+                         headers={"X-Emby-Token": key}, timeout=10)
+            r.raise_for_status()
+            folders = [i.get("Name","") for i in r.json().get("Items",[])]
+            if lib and lib not in folders:
+                return {"ok": False, "error": f"Library '{lib}' not found. Available: {', '.join(folders)}"}
+            return {"ok": True, "libraries": folders}
+        else:
+            from app.plex_xml import plex_get
+            import defusedxml.ElementTree as _ET
+            url   = payload.get("url", "").rstrip("/")
+            token = payload.get("token", "")
+            lib   = payload.get("library_name", "")
+            if not url or not token:
+                return {"ok": False, "error": "URL and token are required"}
+            lib_cfg = {"url": url, "token": token, "library_name": lib,
+                       "page_size": 500, "short_movie_limit": 60}
+            xml  = plex_get("/library/sections", lib_cfg)
+            root = _ET.fromstring(xml)
+            libs = [d.attrib.get("title","") for d in root.findall("Directory")
+                    if d.attrib.get("type") == "movie"]
+            if lib and lib not in libs:
+                return {"ok": False, "error": f"Library '{lib}' not found. Available: {', '.join(libs)}"}
+            return {"ok": True, "libraries": libs}
+    except Exception as e:
+        log.debug(f"Library test failed: {e}")
+        return {"ok": False, "error": "Could not connect — check URL and credentials"}
+
+
+# --------------------------------------------------
 # Results  (FIX #2 — never blocks on first load)
 # --------------------------------------------------
 
@@ -412,7 +491,9 @@ def api_ignore(payload: dict = Body(...)):
     value = payload.get("value")
 
     if kind == "movie":
-        tmdb_id = int(value)
+        tmdb_id = _parse_tmdb_id(value)
+        if tmdb_id is None:
+            return {"ok": False, "error": "Invalid TMDB ID"}
         add_unique(ov["ignore_movies"], tmdb_id)
         ov.setdefault("ignore_movies_meta", {})[str(tmdb_id)] = {
             "title":  payload.get("title", ""),
@@ -439,7 +520,9 @@ def api_unignore(payload: dict = Body(...)):
     value = payload.get("value")
 
     if kind == "movie":
-        tmdb_id = int(value)
+        tmdb_id = _parse_tmdb_id(value)
+        if tmdb_id is None:
+            return {"ok": False, "error": "Invalid TMDB ID"}
         remove_value(ov["ignore_movies"], tmdb_id)
         ov.setdefault("ignore_movies_meta", {}).pop(str(tmdb_id), None)
     elif kind == "franchise":
@@ -636,6 +719,9 @@ def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None
     Route a request through FlareSolverr to bypass Cloudflare.
     Returns raw response bytes on success, None on failure.
     """
+    if err := _validate_url_for_fetch(rss_url):
+        log.warning(f"FlareSolverr fetch blocked ({err}): {rss_url}")
+        return None
     base = flaresolverr_url.rstrip("/")
     try:
         resp = requests.post(
@@ -707,6 +793,11 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
     else:
         rss_url = url.rstrip("/") + "/rss/"
 
+    # Guard against SSRF before making any outbound request
+    if err := _validate_url_for_fetch(rss_url):
+        log.warning(f"Letterboxd fetch blocked ({err}): {rss_url}")
+        return []
+
     # Try direct fetch first; on Cloudflare block (403) try FlareSolverr
     content: bytes | None = None
     try:
@@ -714,7 +805,7 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
             rss_url,
             headers={"User-Agent": "Mozilla/5.0 (compatible; CinePlete/1.0)"},
             timeout=15,
-            allow_redirects=True,
+            allow_redirects=False,
         )
         if resp.status_code == 200:
             content = resp.content
@@ -878,6 +969,8 @@ def letterboxd_add_url(payload: dict = Body(...)):
         return {"ok": False, "error": err}
     ov = load_json(OVERRIDES_FILE)
     ov.setdefault("letterboxd_urls", [])
+    if len(ov["letterboxd_urls"]) >= 50:
+        return {"ok": False, "error": "Maximum 50 Letterboxd URLs allowed"}
     if url not in ov["letterboxd_urls"]:
         ov["letterboxd_urls"].append(url)
         save_json(OVERRIDES_FILE, ov)
@@ -973,7 +1066,9 @@ def radarr_profiles(instance: str = Query(default="primary")):
 
 @app.post("/api/radarr/add")
 def radarr_add(payload: dict = Body(...), instance: str = Query(default="primary")):
-    tmdb_id = int(payload.get("tmdb"))
+    tmdb_id = _parse_tmdb_id(payload.get("tmdb"))
+    if tmdb_id is None:
+        return {"ok": False, "error": "Invalid TMDB ID"}
     title   = str(payload.get("title", ""))
     cfg     = load_config()
 
@@ -1058,7 +1153,9 @@ def overseerr_add(payload: dict = Body(...)):
     cfg = load_config().get("OVERSEERR", {})
     if not cfg.get("OVERSEERR_ENABLED"):
         return {"ok": False, "error": "Overseerr disabled"}
-    tmdb_id = int(payload.get("tmdb"))
+    tmdb_id = _parse_tmdb_id(payload.get("tmdb"))
+    if tmdb_id is None:
+        return {"ok": False, "error": "Invalid TMDB ID"}
     headers = {"X-Api-Key": cfg["OVERSEERR_API_KEY"],
                "Content-Type": "application/json"}
     try:
@@ -1083,7 +1180,9 @@ def jellyseerr_add(payload: dict = Body(...)):
     cfg = load_config().get("JELLYSEERR", {})
     if not cfg.get("JELLYSEERR_ENABLED"):
         return {"ok": False, "error": "Jellyseerr disabled"}
-    tmdb_id = int(payload.get("tmdb"))
+    tmdb_id = _parse_tmdb_id(payload.get("tmdb"))
+    if tmdb_id is None:
+        return {"ok": False, "error": "Invalid TMDB ID"}
     headers = {"X-Api-Key": cfg["JELLYSEERR_API_KEY"],
                "Content-Type": "application/json"}
     try:
@@ -1115,7 +1214,9 @@ def api_webhook(
     saved_secret = str(cfg.get("WEBHOOK_SECRET", "")).strip()
     provided     = secret.strip() or x_cineplete_secret.strip()
 
-    if saved_secret and provided != saved_secret:
+    if not saved_secret:
+        return {"ok": False, "error": "Webhook secret not configured"}
+    if provided != saved_secret:
         return {"ok": False, "error": "Invalid secret"}
 
     if scan_state["running"]:

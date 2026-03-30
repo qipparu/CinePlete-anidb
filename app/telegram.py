@@ -144,3 +144,4 @@ def send_radarr_grab(title: str, year: str | None = None) -> None:
     text     = f"⬇️ *Radarr grabbed:* {title}{year_str}"
     if _send(token, chat_id, text):
         log.info(f"Telegram grab notification sent: {title}")
+        time.sleep(1.1)   # respect Telegram rate limit (1 msg/sec for private chats)

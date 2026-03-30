@@ -1,3 +1,4 @@
+import re
 import requests
 import time
 import json
@@ -8,7 +9,7 @@ from app.logger import get_logger
 
 log = get_logger(__name__)
 
-DATA_DIR   = "/data"
+DATA_DIR   = os.getenv("DATA_DIR", "/data")
 CACHE_FILE = f"{DATA_DIR}/tmdb_cache.json"
 
 # Flush cache to disk every N real HTTP calls so a crash doesn't lose all progress
@@ -58,10 +59,8 @@ class TMDB:
     # --------------------------------------------------
 
     def _cache_key(self, url: str) -> str:
-        key = url.replace(f"?api_key={self.api_key}&", "?") \
-                 .replace(f"?api_key={self.api_key}", "") \
-                 .replace(f"&api_key={self.api_key}", "")
-        return key
+        pattern = re.escape(self.api_key)
+        return re.sub(rf"[?&]api_key={pattern}(&|$)", lambda m: "?" if m.group(1) else "", url)
 
     def _request(self, url: str) -> dict:
         cache_key = self._cache_key(url)

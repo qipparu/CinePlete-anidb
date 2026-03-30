@@ -5,54 +5,53 @@ from collections import defaultdict
 from app.config import load_config
 
 
-def plex_get(path, params=None):
+def _build_lib_cfg(lib_cfg):
+    """Resolve lib_cfg — if None, fall back to legacy PLEX config section."""
+    if lib_cfg is not None:
+        return lib_cfg
     cfg = load_config()
-    plex_cfg = cfg["PLEX"]
+    plex = cfg["PLEX"]
+    return {
+        "url": plex["PLEX_URL"],
+        "token": plex["PLEX_TOKEN"],
+        "library_name": plex["LIBRARY_NAME"],
+        "page_size": int(plex.get("PLEX_PAGE_SIZE", 500)),
+        "short_movie_limit": int(plex.get("SHORT_MOVIE_LIMIT", 60)),
+    }
 
+
+def plex_get(path, lib_cfg=None, params=None):
+    lc = _build_lib_cfg(lib_cfg)
     if params is None:
         params = {}
-
-    params["X-Plex-Token"] = plex_cfg["PLEX_TOKEN"]
-
-    r = requests.get(
-        plex_cfg["PLEX_URL"] + path,
-        params=params,
-        timeout=30
-    )
+    params["X-Plex-Token"] = lc["token"]
+    r = requests.get(lc["url"].rstrip("/") + path, params=params, timeout=30)
     r.raise_for_status()
     return r.text
 
 
-def library_key():
-    cfg = load_config()
-    plex_cfg = cfg["PLEX"]
-
-    xml = plex_get("/library/sections")
+def library_key(lib_cfg=None):
+    lc = _build_lib_cfg(lib_cfg)
+    xml = plex_get("/library/sections", lc)
     root = ET.fromstring(xml)
-
     for d in root.findall("Directory"):
-        if d.attrib.get("title") == plex_cfg["LIBRARY_NAME"]:
+        if d.attrib.get("title") == lc["library_name"]:
             return d.attrib.get("key")
+    raise RuntimeError(f"Plex library '{lc['library_name']}' not found on {lc['url']}")
 
-    raise RuntimeError(f"Library '{plex_cfg['LIBRARY_NAME']}' not found")
 
+def scan_movies(lib_cfg=None):
+    lc = _build_lib_cfg(lib_cfg)
+    short_movie_limit = int(lc.get("short_movie_limit", 60))
+    page_size = int(lc.get("page_size", 500))
+    key = library_key(lc)
 
-def scan_movies():
-    cfg = load_config()
-    plex_cfg = cfg["PLEX"]
-
-    short_movie_limit = int(plex_cfg["SHORT_MOVIE_LIMIT"])
-    page_size = int(plex_cfg["PLEX_PAGE_SIZE"])
-
-    key = library_key()
-
-    plex_ids = {}          # {tmdb_id: plex_title}  — dict so we keep the title
-    plex_editions = {}     # {tmdb_id: editionTitle} for first-seen entry
-    tmdb_id_dupes = {}     # {tmdb_id: [{"title":..., "edition":...}, ...]}
+    plex_ids = {}
+    plex_editions = {}
+    tmdb_id_dupes = {}
     directors = defaultdict(set)
     actors = defaultdict(set)
     no_tmdb_guid = []
-
     start = 0
     scanned = 0
     skipped_short = 0
@@ -60,6 +59,7 @@ def scan_movies():
     while True:
         xml = plex_get(
             f"/library/sections/{key}/all",
+            lc,
             {
                 "type": "1",
                 "includeGuids": "1",
@@ -67,28 +67,20 @@ def scan_movies():
                 "X-Plex-Container-Size": page_size,
             },
         )
-
         root = ET.fromstring(xml)
         videos = root.findall("Video")
-
         if not videos:
             break
-
         for v in videos:
             scanned += 1
-
             title = v.attrib.get("title")
             year = v.attrib.get("year")
-
             duration_ms = v.attrib.get("duration")
             duration_min = int(duration_ms) / 60000 if duration_ms else 0
-
             if duration_min < short_movie_limit:
                 skipped_short += 1
                 continue
-
             tmdb_id = None
-
             for g in v.findall("Guid"):
                 gid = g.attrib.get("id")
                 if gid and gid.startswith("tmdb://"):
@@ -97,17 +89,10 @@ def scan_movies():
                     except Exception:
                         tmdb_id = None
                     break
-
             if not tmdb_id:
-                no_tmdb_guid.append({
-                    "title": title,
-                    "year": year
-                })
+                no_tmdb_guid.append({"title": title, "year": year})
                 continue
-
             edition = v.attrib.get("editionTitle", "")
-
-            # Store title alongside tmdb_id so we can show it if TMDB lookup fails
             if tmdb_id in plex_ids:
                 if tmdb_id not in tmdb_id_dupes:
                     tmdb_id_dupes[tmdb_id] = [{"title": plex_ids[tmdb_id], "edition": plex_editions.get(tmdb_id, "")}]
@@ -115,17 +100,14 @@ def scan_movies():
             else:
                 plex_ids[tmdb_id] = title
                 plex_editions[tmdb_id] = edition
-
             for d in v.findall("Director"):
                 tag = d.attrib.get("tag")
                 if tag:
                     directors[tag].add(tmdb_id)
-
             for r in v.findall("Role"):
                 tag = r.attrib.get("tag")
                 if tag:
                     actors[tag].add(tmdb_id)
-
         start += len(videos)
 
     directors = {k: v for k, v in directors.items() if len(v) > 1}
@@ -143,5 +125,4 @@ def scan_movies():
             for tmdb_id, titles in tmdb_id_dupes.items()
         ],
     }
-
     return plex_ids, directors, actors, stats, no_tmdb_guid

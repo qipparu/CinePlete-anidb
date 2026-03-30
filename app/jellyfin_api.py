@@ -15,13 +15,27 @@ from app.logger import get_logger
 log = get_logger(__name__)
 
 
-def _jf_get(path: str, params: dict = None) -> dict:
-    """Make an authenticated GET request to Jellyfin and return JSON."""
+def _build_lib_cfg(lib_cfg):
+    """Resolve lib_cfg — if None, fall back to legacy JELLYFIN config section."""
+    if lib_cfg is not None:
+        return lib_cfg
     cfg = load_config()
-    jf  = cfg["JELLYFIN"]
+    jf = cfg["JELLYFIN"]
+    return {
+        "url": jf["JELLYFIN_URL"],
+        "api_key": jf["JELLYFIN_API_KEY"],
+        "library_name": jf.get("JELLYFIN_LIBRARY_NAME", "Movies"),
+        "page_size": int(jf.get("JELLYFIN_PAGE_SIZE", 500)),
+        "short_movie_limit": int(jf.get("SHORT_MOVIE_LIMIT", 60)),
+    }
 
-    headers = {"X-Emby-Token": jf["JELLYFIN_API_KEY"]}
-    url     = jf["JELLYFIN_URL"].rstrip("/") + path
+
+def _jf_get(path: str, lib_cfg=None, params: dict = None) -> dict:
+    """Make an authenticated GET request to Jellyfin and return JSON."""
+    lc = _build_lib_cfg(lib_cfg)
+
+    headers = {"X-Emby-Token": lc["api_key"]}
+    url     = lc["url"].rstrip("/") + path
 
     try:
         r = requests.get(url, headers=headers, params=params or {}, timeout=30)
@@ -29,21 +43,21 @@ def _jf_get(path: str, params: dict = None) -> dict:
         return r.json()
     except requests.exceptions.ConnectionError as exc:
         raise RuntimeError(
-            f"Cannot connect to Jellyfin at {jf['JELLYFIN_URL']} — "
-            "check JELLYFIN_URL in config and that Jellyfin is reachable"
+            f"Cannot connect to Jellyfin at {lc['url']} — "
+            "check url in config and that Jellyfin is reachable"
         ) from exc
 
 
-def _library_id(library_name: str) -> str:
+def _library_id(library_name: str, lib_cfg=None) -> str:
     """Resolve a library name to its Jellyfin item ID."""
-    data = _jf_get("/Library/MediaFolders")
+    data = _jf_get("/Library/MediaFolders", lib_cfg)
     for item in data.get("Items", []):
         if item.get("Name", "").lower() == library_name.lower():
             return item["Id"]
     raise RuntimeError(f"Jellyfin library '{library_name}' not found")
 
 
-def scan_movies():
+def scan_movies(lib_cfg=None):
     """
     Scan the configured Jellyfin movie library.
 
@@ -54,14 +68,13 @@ def scan_movies():
         stats         dict             — scan statistics
         no_tmdb_guid  list[dict]       — films without a TMDB provider ID
     """
-    cfg    = load_config()
-    jf_cfg = cfg["JELLYFIN"]
+    lc = _build_lib_cfg(lib_cfg)
 
-    short_movie_limit = int(jf_cfg.get("SHORT_MOVIE_LIMIT", 60))
-    page_size         = int(jf_cfg.get("JELLYFIN_PAGE_SIZE", 500))
-    library_name      = jf_cfg.get("JELLYFIN_LIBRARY_NAME", "Movies")
+    short_movie_limit = int(lc.get("short_movie_limit", 60))
+    page_size         = int(lc.get("page_size", 500))
+    library_name      = lc.get("library_name", "Movies")
 
-    library_id = _library_id(library_name)
+    library_id = _library_id(library_name, lc)
     log.info(f"Jellyfin library '{library_name}' → ID {library_id}")
 
     media_ids    = {}          # {tmdb_id: title}
@@ -75,7 +88,7 @@ def scan_movies():
     skipped_short = 0
 
     while True:
-        data = _jf_get("/Items", {
+        data = _jf_get("/Items", lc, {
             "ParentId":        library_id,
             "IncludeItemTypes":"Movie",
             "Recursive":       "true",
@@ -118,8 +131,8 @@ def scan_movies():
 
             if tmdb_id in media_ids:
                 if tmdb_id not in tmdb_id_dupes:
-                    tmdb_id_dupes[tmdb_id] = [media_ids[tmdb_id]]
-                tmdb_id_dupes[tmdb_id].append(title)
+                    tmdb_id_dupes[tmdb_id] = [{"title": media_ids[tmdb_id], "edition": ""}]
+                tmdb_id_dupes[tmdb_id].append({"title": title, "edition": ""})
             else:
                 media_ids[tmdb_id] = title
 
