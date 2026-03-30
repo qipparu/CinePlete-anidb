@@ -77,3 +77,8 @@ coverage/
 # -------------------------
 .claude/
 CLAUDE.md
+
+# -------------------------
+# Code Reviews
+# -------------------------
+CODE_REVIEW.txt
