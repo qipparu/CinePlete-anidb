@@ -223,7 +223,9 @@
         if (data.ok) {
           const params  = new URLSearchParams(window.location.search)
           const nextUrl = params.get("next") || "/"
-          window.location.href = nextUrl.startsWith("/") ? nextUrl : "/"
+          // Reject protocol-relative URLs (//evil.com) and absolute URLs
+          const isSafeRedirect = nextUrl.startsWith("/") && !nextUrl.startsWith("//")
+          window.location.href = isSafeRedirect ? nextUrl : "/"
         } else {
           showError(data.error || "Login failed")
           btn.disabled    = false
