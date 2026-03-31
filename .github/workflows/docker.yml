@@ -325,6 +325,12 @@ jobs:
           SKIP_SYSTEMD: "1"
         run: sudo -E bash install/install.sh
 
+      - name: Overwrite release with current checkout
+        run: |
+          sudo rsync -a --exclude='.venv' --exclude='__pycache__' \
+            ./ /opt/cineplete/
+          sudo chown -R cineplete:cineplete /opt/cineplete
+
       - name: Start app manually
         run: |
           sudo -u cineplete bash -c '
