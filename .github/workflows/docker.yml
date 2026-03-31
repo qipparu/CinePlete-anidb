@@ -327,8 +327,8 @@ jobs:
 
       - name: Start app manually
         run: |
-          cd /opt/cineplete && \
           sudo -u cineplete /opt/cineplete/.venv/bin/uvicorn app.web:app \
+            --app-dir /opt/cineplete \
             --host 0.0.0.0 --port 7474 &
           sleep 5
 
