@@ -5,6 +5,7 @@ Registers middleware, lifespan, and mounts all feature routers.
 Business logic lives in app/routers/*.
 """
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -18,7 +19,8 @@ from app import scheduler
 
 from app.routers import auth, config, scan, overrides, letterboxd, integrations, cache
 
-STATIC_DIR = os.getenv("STATIC_DIR", "/app/static")
+_BASE_DIR  = Path(__file__).resolve().parent.parent
+STATIC_DIR = os.getenv("STATIC_DIR", str(_BASE_DIR / "static"))
 
 # ---------------------------------------------------------------------------
 # Lifespan (scheduler start/stop)
