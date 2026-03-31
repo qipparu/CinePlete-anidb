@@ -351,7 +351,10 @@ function renderConfig(){
       <div class="form-section" id="libraries-section">
         ${sec("Libraries")}
         <div id="lib-list">
-          ${(CONFIG.LIBRARIES||[]).map((lib, i) => _libEntryHtml(lib, i)).join("")}
+          ${((CONFIG.LIBRARIES||[]).length
+            ? CONFIG.LIBRARIES
+            : [{type:"plex",enabled:true,label:"",url:"",token:"",library_name:"",page_size:500,short_movie_limit:60}]
+          ).map((lib, i) => _libEntryHtml(lib, i)).join("")}
         </div>
         <div style="display:flex;gap:.5rem;margin-top:.5rem">
           <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(229,160,13,.3);color:var(--gold)"
