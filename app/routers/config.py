@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from app.config import load_config, save_config, is_configured
 from app.auth import hash_password, generate_secret_key
 from app import scheduler
-from app.routers._shared import log, _validate_url_for_fetch
+from app.routers._shared import log
 
 router = APIRouter()
 
@@ -85,8 +85,8 @@ def library_test(payload: dict = Body(...)):
             lib = payload.get("library_name", "")
             if not url or not key:
                 return {"ok": False, "error": "URL and API key are required"}
-            if ssrf_err := _validate_url_for_fetch(url):
-                return {"ok": False, "error": ssrf_err}
+            if urlparse(url).scheme not in ("http", "https"):
+                return {"ok": False, "error": "URL must start with http:// or https://"}
             r = _req.get(f"{url}/Library/MediaFolders",
                          headers={"X-Emby-Token": key}, timeout=10)
             r.raise_for_status()
@@ -102,8 +102,8 @@ def library_test(payload: dict = Body(...)):
             lib   = payload.get("library_name", "")
             if not url or not token:
                 return {"ok": False, "error": "URL and token are required"}
-            if ssrf_err := _validate_url_for_fetch(url):
-                return {"ok": False, "error": ssrf_err}
+            if urlparse(url).scheme not in ("http", "https"):
+                return {"ok": False, "error": "URL must start with http:// or https://"}
             lib_cfg = {"url": url, "token": token, "library_name": lib,
                        "page_size": 500, "short_movie_limit": 60}
             xml  = plex_get("/library/sections", lib_cfg)
