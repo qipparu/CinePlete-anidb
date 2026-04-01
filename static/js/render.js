@@ -726,9 +726,20 @@ async function renderLogs(){
 
   try {
     const res  = await fetch("/api/logs?lines=200")
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    }
     const data = await res.json()
     const box  = document.getElementById("log-box")
+    if (!box) return
     box.innerHTML = ""
+    if (!data.lines || data.lines.length === 0) {
+      const span = document.createElement("span")
+      span.style.color = "var(--text3)"
+      span.textContent = "No log entries yet"
+      box.appendChild(span)
+      return
+    }
     data.lines.forEach(line => {
       let color = "var(--text2)"
       if (line.includes("[ERROR   ]"))    color = "var(--red)"
@@ -816,11 +827,14 @@ async function copyLetterboxdToClipboard() {
   if (!EXPORT_TABS.has(ACTIVE_TAB)) return
   try {
     const res  = await fetch(`/api/export?format=letterboxd&tab=${ACTIVE_TAB}`)
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    }
     const text = await res.text()
     await navigator.clipboard.writeText(text)
     toast("Letterboxd list copied to clipboard!", "success")
   } catch(e) {
-    toast("Could not copy to clipboard", "error")
+    toast("Could not copy to clipboard: " + (e.message || "error"), "error")
   }
 }
 

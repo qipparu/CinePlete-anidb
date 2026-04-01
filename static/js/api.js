@@ -3,10 +3,30 @@
 ============================================================ */
 
 async function api(path, method = "GET", body = null){
-  const opts = { method, headers:{} }
-  if (body){ opts.headers["Content-Type"]="application/json"; opts.body=JSON.stringify(body) }
-  const r = await fetch(path, opts)
-  return r.json()
+  try {
+    const opts = { method, headers:{} }
+    if (body){ opts.headers["Content-Type"]="application/json"; opts.body=JSON.stringify(body) }
+    const r = await fetch(path, opts)
+
+    // Handle non-200 responses
+    if (!r.ok) {
+      // Try to parse error JSON, fallback to status text
+      try {
+        const err = await r.json()
+        return { ok: false, error: err.error || err.detail || err.message || `HTTP ${r.status}`, status: r.status }
+      } catch {
+        return { ok: false, error: `HTTP ${r.status}: ${r.statusText}`, status: r.status }
+      }
+    }
+
+    // Success - merge response data with metadata
+    const data = await r.json()
+    return { ...data, ok: true, status: r.status }
+  } catch (e) {
+    // Network error or other fetch failure
+    console.error("API request failed:", e)
+    return { ok: false, error: e.message || "Network error", status: 0 }
+  }
 }
 
 function toast(msg, type = "info"){
