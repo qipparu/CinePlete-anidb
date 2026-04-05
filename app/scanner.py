@@ -542,7 +542,9 @@ def _get_best_season_poster(tmdb_tv_id: int, tvdb_id: int, season_num: str, tmdb
 
     return fallback_poster
 
-def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[list, dict]:
+def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict, 
+                           mal_completed_anidb: set = None, 
+                           mal_completed_tvdb: set = None) -> tuple[list, dict]:
     """
     Group library anime entries by TVDB ID, then compare which seasons the user
     has vs. all seasons known in the anime-list-master.xml mapping.
@@ -584,8 +586,9 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
         def _get_aid(e):
             return e.anidb_id if hasattr(e, "anidb_id") else e.get("anidb_id")
 
-        seasons_have    = [e for e in all_seasons if _get_aid(e) in library_anidb_ids]
-        missing_seasons = [e for e in all_seasons if _get_aid(e) not in library_anidb_ids]
+        mal_c_anidb = mal_completed_anidb or set()
+        seasons_have    = [e for e in all_seasons if _get_aid(e) in library_anidb_ids or _get_aid(e) in mal_c_anidb]
+        missing_seasons = [e for e in all_seasons if _get_aid(e) not in library_anidb_ids and _get_aid(e) not in mal_c_anidb]
 
 
         # Prefer the TMDB ID from the first library entry (more reliable than mapping)
@@ -603,7 +606,8 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
             tv_data = tmdb.tv_show(tmdb_tv_id)
             if tv_data:
                 show_name  = tv_data.get("name") or show_name
-                poster_url = tmdb.poster_url(tv_data.get("poster_path"))
+                poster_path = tv_data.get("poster_path")
+                poster_url = tmdb.poster_url(poster_path) if poster_path else library_entries[0].get("poster")
         else:
             # Try to resolve via TVDB → TMDB
             find_data = tmdb.find_by_tvdb(tvdb_id)
@@ -611,7 +615,11 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
             if tv_results:
                 tmdb_tv_id = tv_results[0].get("id")
                 show_name  = tv_results[0].get("name") or show_name
-                poster_url = tmdb.poster_url(tv_results[0].get("poster_path"))
+                poster_path = tv_results[0].get("poster_path")
+                poster_url = tmdb.poster_url(poster_path) if poster_path else library_entries[0].get("poster")
+            else:
+                # Fallback to library poster
+                poster_url = library_entries[0].get("poster")
 
         unique_seasons = set()
         valid_all_seasons = []
@@ -701,7 +709,8 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
         "missing_seasons_total": missing_seasons_total,
     }
 
-def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set) -> tuple[list, list]:
+def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set,
+                               mal_completed_anidb: set = None) -> tuple[list, list]:
     """
     Group library anime entries by HAMA Moviesets (franchises),
     calculate progress, and resolve missing entries.
@@ -740,11 +749,12 @@ def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set) 
         if total < 2:
             continue
 
-        have = sum(1 for aid in col_items if aid in library_anidb_ids)
+        mal_c_anidb = mal_completed_anidb or set()
+        have = sum(1 for aid in col_items if aid in library_anidb_ids or aid in mal_c_anidb)
         missing = []
 
         for aid in col_items:
-            if aid in library_anidb_ids:
+            if aid in library_anidb_ids or aid in mal_c_anidb:
                 continue
             
             # Found missing item. Get metadata
@@ -988,6 +998,32 @@ def build():
     # ---- WISHLIST ---------------------------------------------
     wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb)
 
+    # ---- MAL INTEGRATION --------------------------------------
+    mal_completed_anidb = set()
+    mal_completed_tvdb  = set()
+    mal_completed_tmdb  = set()
+    
+    shiki_cfg = cfg.get("SHIKIMORI", {})
+    if shiki_cfg.get("SHIKIMORI_ENABLED") and shiki_cfg.get("SHIKIMORI_EXPORT_URL"):
+        try:
+            from app.routers.shikimori import load_shikimori_export, get_shikimori_mapper
+            export_path = shiki_cfg["SHIKIMORI_EXPORT_URL"]
+            log.info(f"Loading MAL export for anime analysis from {export_path}...")
+            export_items = load_shikimori_export(export_path)
+            if export_items:
+                mapper = get_shikimori_mapper()
+                for item in export_items:
+                    if item.get("status") == "completed":
+                        mapping = mapper.lookup_mal(item["target_id"])
+                        if mapping:
+                            if mapping.anidb_id: mal_completed_anidb.add(int(mapping.anidb_id))
+                            for rid in mapping.tvdb_id: mal_completed_tvdb.add(int(rid))
+                            for rid in mapping.tmdb_show_id: mal_completed_tmdb.add(int(rid))
+                            for rid in mapping.tmdb_movie_id: mal_completed_tmdb.add(int(rid))
+                log.info(f"MAL: {len(mal_completed_anidb)} AniDB / {len(mal_completed_tvdb)} TVDB IDs marked as completed on MAL")
+        except Exception as e:
+            log.warning(f"Failed to load MAL export for scanner: {e}")
+
     # ---- ANIME SEASONS ----------------------------------------
     tvdb_api_key = cfg.get("TVDB", {}).get("TVDB_API_KEY")
     tvdb = None
@@ -999,10 +1035,16 @@ def build():
             log.warning(f"Failed to initialize TVDB client: {e}")
 
     _set_step(7, f"{len(anidb_items)} anime entries")
-    anime_list, anime_stats = _analyze_anime_seasons(anidb_items, tmdb, tvdb, cfg)
+    anime_list, anime_stats = _analyze_anime_seasons(
+        anidb_items, tmdb, tvdb, cfg,
+        mal_completed_anidb, mal_completed_tvdb
+    )
 
     # ---- ANIME FRANCHISES -------------------------------------
-    anime_franchises, anime_franchise_completion = _analyze_anime_collections(anidb_items, tmdb, ignore_franchises)
+    anime_franchises, anime_franchise_completion = _analyze_anime_collections(
+        anidb_items, tmdb, ignore_franchises,
+        mal_completed_anidb
+    )
 
     # Merge TV Series into Anime Franchises
     for a in anime_list:

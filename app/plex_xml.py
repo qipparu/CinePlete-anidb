@@ -284,6 +284,8 @@ def scan_shows(lib_cfg=None):
             scanned += 1
             title = show.attrib.get("title", "")
             year  = show.attrib.get("year", "")
+            thumb = show.attrib.get("thumb", "")
+            poster_url = f"{lc['url'].rstrip('/')}{thumb}?X-Plex-Token={lc['token']}" if thumb else None
 
             guids     = _extract_guids(show)
             tmdb_id   = guids["tmdb_id"]
@@ -301,7 +303,9 @@ def scan_shows(lib_cfg=None):
                         anidb_resolved += 1
                         log.debug(f"AniDB→TMDB: anidb/{anidb_raw} → tmdb/{tmdb_id} ({title})")
                     # Record this show for season-tracking regardless
-                    anidb_items.append(entry.as_dict())
+                    e_dict = entry.as_dict()
+                    e_dict["poster"] = poster_url
+                    anidb_items.append(e_dict)
                 else:
                     anidb_not_mapped += 1
                     log.debug(f"AniDB not mapped: anidb/{anidb_raw} ({title})")
@@ -311,10 +315,12 @@ def scan_shows(lib_cfg=None):
             if not entry and (tvdb_raw or tmdb_id):
                 anidb_items.append({
                     "title":    title,
+                    "poster":   poster_url,
                     "anidb_id": int(anidb_raw) if (anidb_raw and anidb_raw.isdigit()) else None,
                     "tvdb_id":  int(tvdb_raw)  if (tvdb_raw and tvdb_raw.isdigit()) else None,
                     "tmdb_id":  tmdb_id
                 })
+
 
             if tmdb_id:
                 if tmdb_id not in plex_ids:

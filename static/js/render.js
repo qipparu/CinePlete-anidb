@@ -1131,32 +1131,72 @@ async function renderShikimori() {
     const statusLabels = {
         watching: "Currently Watching",
         planned:  "Plan to Watch",
-        completed: "Completed",
         on_hold:  "On Hold",
-        dropped:  "Dropped"
+        dropped:  "Dropped",
+        completed: "Completed"
     };
 
     let hasAny = false;
-    for (const status of ["watching", "planned", "completed", "on_hold", "dropped"]) {
+    
+    // 1. Missing on MAL Section (Grouped by Franchise)
+    const missingFranchises = res.missing_on_mal || [];
+    if (missingFranchises.length > 0) {
+        hasAny = true;
+        html += `
+        <div style="margin-bottom:2.5rem;border:1px solid var(--border2);padding:1.5rem;border-radius:12px;background:rgba(239,68,68,0.02)">
+            <div class="group-header" style="margin-bottom:1.5rem">
+                <span class="group-name" style="color:var(--red);font-size:1.1rem">Library Franchises Missing on MAL</span>
+                <span class="group-count">${missingFranchises.length} franchises</span>
+            </div>`;
+        
+        missingFranchises.forEach(f => {
+            html += `
+            <div style="margin-bottom:1.5rem" class="mal-franchise-group">
+                <div style="font-size:.7rem;color:var(--text3);text-transform:uppercase;margin-bottom:0.8rem;letter-spacing:0.05em;border-left:2px solid var(--red);padding-left:10px">${f.name}</div>
+                <div class="grid-posters">
+                    ${f.items.map(m => {
+                        const item = {
+                            title: m.title,
+                            year: "",
+                            poster: m.poster,
+                            tmdb: m.tmdb_id,
+                            anidb: m.anidb_id,
+                            tvdb: m.tvdb_id,
+                            _mal_id: m.mal_id
+                        };
+                        return posterCard(item, `<span style="background:rgba(239, 68, 68, 0.15);color:#f87171;font-size:.58rem;padding:1px 5px;border-radius:3px;border:1px solid rgba(239, 68, 68, 0.3)">MISSING ON MAL</span>`);
+                    }).join("")}
+                </div>
+            </div>`;
+        });
+        
+        html += `</div>`;
+    }
+
+
+    // 2. Standard Status Groups
+    for (const status of ["watching", "planned", "on_hold", "dropped", "completed"]) {
         const list = groups[status] || [];
         if (!list.length) continue;
         hasAny = true;
 
+        const isCompleted = (status === "completed");
+        
         html += `
-        <div style="margin-bottom:2.5rem">
-            <div class="group-header" style="margin-bottom:1rem">
-                <span class="group-name">${statusLabels[status]}</span>
-                <span class="group-count">${list.length} items</span>
+        <div style="margin-bottom:2rem" id="shiki-section-${status}">
+            <div class="group-header" style="margin-bottom:1rem; cursor:${isCompleted?'pointer':'default'}" 
+                 ${isCompleted ? `onclick="toggleShikiSection('${status}')"` : ""}>
+                <span class="group-name" style="${isCompleted ? 'color:var(--text3)' : ''}">${statusLabels[status]}</span>
+                <span class="group-count">${list.length} items ${isCompleted ? '<span id="shiki-toggle-icon-'+status+'" style="margin-left:5px">▼</span>' : ""}</span>
             </div>
-            <div class="grid-posters">
+            <div class="grid-posters" id="shiki-grid-${status}" style="${isCompleted ? 'display:none' : ''}">
                 ${list.map(m => {
                     const badge = !m.is_owned 
                         ? `<span style="background:rgba(239, 68, 68, 0.15);color:#f87171;font-size:.58rem;padding:1px 5px;border-radius:3px;border:1px solid rgba(239, 68, 68, 0.3)">MISSING</span>`
                         : `<span style="background:rgba(34, 197, 94, 0.15);color:#4ade80;font-size:.58rem;padding:1px 5px;border-radius:3px;">IN LIBRARY</span>`;
                     
-                    // Simple mock item for posterCard since we don't have full metadata here yet
                     const item = {
-                        title: m.title_ru || m.title,
+                        title: m.title,
                         year: "",
                         poster: m.poster,
                         tmdb: m.tmdb_id,
@@ -1168,6 +1208,7 @@ async function renderShikimori() {
             </div>
         </div>`;
     }
+
 
     if (!hasAny) {
         html += emptyStateHTML("No items found in your Shikimori list.");
@@ -1185,3 +1226,16 @@ async function triggerShikimoriRefresh() {
         showToast("Refresh failed", "error");
     }
 }
+
+function toggleShikiSection(status) {
+    const grid = document.getElementById(`shiki-grid-${status}`);
+    const icon = document.getElementById(`shiki-toggle-icon-${status}`);
+    if (grid.style.display === "none") {
+        grid.style.display = "grid";
+        icon.innerText = "▲";
+    } else {
+        grid.style.display = "none";
+        icon.innerText = "▼";
+    }
+}
+

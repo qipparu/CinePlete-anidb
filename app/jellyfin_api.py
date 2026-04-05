@@ -254,6 +254,8 @@ def scan_shows(lib_cfg=None):
             scanned += 1
             title = item.get("Name", "")
             year  = str(item.get("ProductionYear", "")) or None
+            item_id = item.get("Id")
+            poster_url = f"{lc['url'].rstrip('/')}/Items/{item_id}/Images/Primary?api_key={lc['api_key']}" if item_id else None
 
             provider_ids = item.get("ProviderIds", {})
             tmdb_raw  = provider_ids.get("Tmdb")  or provider_ids.get("tmdb")
@@ -278,7 +280,9 @@ def scan_shows(lib_cfg=None):
                     if not tmdb_id and entry.tmdb_id:
                         tmdb_id = entry.tmdb_id
                         anidb_resolved += 1
-                    anidb_items.append(entry.as_dict())
+                    e_dict = entry.as_dict()
+                    e_dict["poster"] = poster_url
+                    anidb_items.append(e_dict)
                 else:
                     anidb_not_mapped += 1
 
@@ -287,10 +291,12 @@ def scan_shows(lib_cfg=None):
             if not entry and (tvdb_raw or tmdb_id):
                 anidb_items.append({
                     "title":    title,
-                    "anidb_id": int(anidb_raw) if anidb_raw else None,
-                    "tvdb_id":  int(tvdb_raw)  if tvdb_raw else None,
+                    "poster":   poster_url,
+                    "anidb_id": int(anidb_raw) if (anidb_raw and anidb_raw.isdigit()) else None,
+                    "tvdb_id":  int(tvdb_raw)  if (tvdb_raw and tvdb_raw.isdigit()) else None,
                     "tmdb_id":  tmdb_id
                 })
+
 
             if tmdb_id:
                 if tmdb_id not in plex_ids:

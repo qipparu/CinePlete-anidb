@@ -45,6 +45,9 @@ class ShikimoriMapper:
         self.ttl_seconds = ttl_days * 86_400
         self._lock = threading.Lock()
         self._mal_to_entry: Dict[int, ShikimoriMappingEntry] = {}
+        self._anidb_to_entry: Dict[int, ShikimoriMappingEntry] = {}
+        self._tvdb_to_entry: Dict[int, ShikimoriMappingEntry] = {}
+        self._tmdb_to_entry: Dict[int, ShikimoriMappingEntry] = {}
         self._ready = False
 
     def load(self, force: bool = False):
@@ -165,7 +168,11 @@ class ShikimoriMapper:
             return None
 
     def _parse(self, data: dict):
-        mal_map = {}
+        mal_map   = {}
+        anidb_map = {}
+        tvdb_map  = {}
+        tmdb_map  = {}
+
         def _as_list(val):
             if val is None: return []
             if isinstance(val, (int, str)): return [val]
@@ -175,7 +182,7 @@ class ShikimoriMapper:
             mal_ids = _as_list(entry.get("mal_id"))
             mapping = ShikimoriMappingEntry(
                 internal_id = internal_id,
-                anidb_id    = entry.get("anidb_id"), # usually single int
+                anidb_id    = entry.get("anidb_id"),
                 mal_ids     = mal_ids,
                 tvdb_id     = _as_list(entry.get("tvdb_id")),
                 tmdb_show_id = _as_list(entry.get("tmdb_show_id")),
@@ -184,11 +191,37 @@ class ShikimoriMapper:
             )
             for mid in mal_ids:
                 mal_map[int(mid)] = mapping
-        self._mal_to_entry = mal_map
-        log.info(f"Shikimori Mapping: parsed {len(mal_map)} MAL IDs from {len(data)} entries")
+            
+            if mapping.anidb_id:
+                anidb_map[int(mapping.anidb_id)] = mapping
+            for tid in mapping.tvdb_id:
+                tvdb_map[int(tid)] = mapping
+            for tid in mapping.tmdb_show_id:
+                tmdb_map[int(tid)] = mapping
+            for tid in mapping.tmdb_movie_id:
+                tmdb_map[int(tid)] = mapping
+
+        self._mal_to_entry   = mal_map
+        self._anidb_to_entry = anidb_map
+        self._tvdb_to_entry  = tvdb_map
+        self._tmdb_to_entry  = tmdb_map
+        log.info(f"Shikimori Mapping: parsed {len(mal_map)} MAL IDs and reverse maps from {len(data)} entries")
 
     def lookup_mal(self, mal_id: int) -> Optional[ShikimoriMappingEntry]:
-        return self._mal_to_entry.get(mal_id)
+        try: return self._mal_to_entry.get(int(mal_id))
+        except (ValueError, TypeError): return None
+
+    def lookup_anidb(self, anidb_id: int) -> Optional[ShikimoriMappingEntry]:
+        try: return self._anidb_to_entry.get(int(anidb_id))
+        except (ValueError, TypeError): return None
+
+    def lookup_tvdb(self, tvdb_id: int) -> Optional[ShikimoriMappingEntry]:
+        try: return self._tvdb_to_entry.get(int(tvdb_id))
+        except (ValueError, TypeError): return None
+
+    def lookup_tmdb(self, tmdb_id: int) -> Optional[ShikimoriMappingEntry]:
+        try: return self._tmdb_to_entry.get(int(tmdb_id))
+        except (ValueError, TypeError): return None
 
 _mapper_instance: Optional[ShikimoriMapper] = None
 _mapper_lock = threading.Lock()
@@ -297,6 +330,11 @@ class ShikimoriAnalyzer:
     def analyze(self, export_items: List[Dict[str, Any]]) -> Dict[str, Any]:
         groups = {"watching": [], "planned": [], "completed": [], "on_hold": [], "dropped": []}
         stats = {"total": len(export_items), "owned": 0, "missing": 0}
+        
+        mal_ids_in_export = set()
+        for item in export_items:
+            if item.get("target_id"):
+                mal_ids_in_export.add(int(item["target_id"]))
 
         for item in export_items:
             mal_id = item.get("target_id")
@@ -305,42 +343,110 @@ class ShikimoriAnalyzer:
 
             mapping = self.mapper.lookup_mal(mal_id)
             is_owned = False
-            def _is_owned(id_val, container):
-                if not id_val: return False
-                if isinstance(id_val, list):
-                    return any(str(i) in container or i in container for i in id_val)
-                return str(id_val) in container or id_val in container
-
+            
+            # Find library item if owned (to get its poster)
+            lib_item = None
             if mapping:
-                if _is_owned(mapping.anidb_id, self.owned_anidb):
-                    is_owned = True
-                elif _is_owned(mapping.tvdb_id, self.owned_tvdb):
-                    is_owned = True
-                elif _is_owned(mapping.tmdb_show_id, self.owned_tmdb):
-                    is_owned = True
-                elif _is_owned(mapping.tmdb_movie_id, self.owned_tmdb):
-                    is_owned = True
+                # Try to find a matching library item in anidb_items
+                for li in self.library.get("media_server", {}).get("anidb_items", []):
+                    # Match by AniDB
+                    if mapping.anidb_id and li.get("anidb_id") == int(mapping.anidb_id):
+                        lib_item = li; break
+                    # Match by TVDB
+                    if li.get("tvdb_id") and int(li["tvdb_id"]) in [int(tid) for tid in mapping.tvdb_id]:
+                        lib_item = li; break
+                    # Match by TMDB
+                    if li.get("tmdb_id") and (int(li["tmdb_id"]) in [int(tid) for tid in mapping.tmdb_show_id] or 
+                                              int(li["tmdb_id"]) in [int(tid) for tid in mapping.tmdb_movie_id]):
+                        lib_item = li; break
+            
+            if lib_item: is_owned = True
 
             if is_owned: stats["owned"] += 1
             else: stats["missing"] += 1
 
+            # Poster resolution: Library -> TMDB
+            poster = None
+            if lib_item and lib_item.get("poster"):
+                poster = lib_item["poster"]
+            elif mapping and self.tmdb:
+                tmdb_id = (mapping.tmdb_show_id[0] if mapping.tmdb_show_id else 
+                           (mapping.tmdb_movie_id[0] if mapping.tmdb_movie_id else None))
+                if tmdb_id:
+                    is_tv = bool(mapping.tmdb_show_id)
+                    res = self.tmdb.tv_show(tmdb_id) if is_tv else self.tmdb.movie(tmdb_id)
+                    if res and res.get("poster_path"):
+                        poster = f"https://image.tmdb.org/t/p/w342{res['poster_path']}"
+
             display_item = {
                 "mal_id": mal_id,
                 "title": item.get("target_title"),
-                "title_ru": item.get("target_title_ru"),
                 "status": status,
                 "score": item.get("score"),
                 "episodes": item.get("episodes"),
                 "is_owned": is_owned,
-                "tmdb_id": mapping.tmdb_show_id or mapping.tmdb_movie_id if mapping else None,
+                "poster": poster,
+                "tmdb_id": (mapping.tmdb_show_id[0] if (mapping and mapping.tmdb_show_id) else 
+                            (mapping.tmdb_movie_id[0] if (mapping and mapping.tmdb_movie_id) else None)),
                 "anidb_id": mapping.anidb_id if mapping else None,
             }
             if status in groups: groups[status].append(display_item)
             else: groups.setdefault("other", []).append(display_item)
 
+        # --- "Missing on MAL" Analysis ---
+        missing_on_mal_groups = {} # { franchise_name: [ items ] }
+        
+        from app.anidb_mapping import get_mapper as get_anidb_mapper
+        anidb_mapper = get_anidb_mapper()
+
+        seen_mal_ids = set()
+        for li in self.library.get("media_server", {}).get("anidb_items", []):
+            mapped = None
+            if li.get("anidb_id"): mapped = self.mapper.lookup_anidb(li["anidb_id"])
+            if not mapped and li.get("tvdb_id"): mapped = self.mapper.lookup_tvdb(li["tvdb_id"])
+            if not mapped and li.get("tmdb_id"): mapped = self.mapper.lookup_tmdb(li["tmdb_id"])
+            
+            if mapped:
+                on_mal = False
+                for mid in mapped.mal_ids:
+                    if int(mid) in mal_ids_in_export:
+                        on_mal = True; break
+                
+                if not on_mal:
+                    # Use the first MAL ID as representative
+                    mid = int(mapped.mal_ids[0]) if mapped.mal_ids else None
+                    if mid and mid not in seen_mal_ids:
+                        seen_mal_ids.add(mid)
+                        
+                        # Resolve franchise name
+                        cname = "General"
+                        if li.get("anidb_id"):
+                            cname = anidb_mapper.collection_for_anidb(int(li["anidb_id"])) or "Other"
+                        
+                        missing_on_mal_groups.setdefault(cname, []).append({
+                            "title": li.get("title"),
+                            "poster": li.get("poster"),
+                            "mal_id": mid,
+                            "tmdb_id": li.get("tmdb_id"),
+                            "anidb_id": li.get("anidb_id"),
+                            "tvdb_id": li.get("tvdb_id")
+                        })
+        
+        # Convert to list of groups
+        missing_on_mal = []
+        for cname, items in missing_on_mal_groups.items():
+            missing_on_mal.append({
+                "name": cname,
+                "items": items
+            })
+        missing_on_mal.sort(key=lambda x: x["name"].lower())
+
         for key in groups:
-            groups[key].sort(key=lambda x: (-(x["score"] or 0), x["title"] or ""))
-        return {"stats": stats, "groups": groups}
+            groups[key].sort(key=lambda x: (-(x["score"] or 0), (x["title"] or "")))
+        
+        return {"stats": stats, "groups": groups, "missing_on_mal": missing_on_mal}
+
+
 
 # --------------------------------------------------
 # API Routes
@@ -383,9 +489,11 @@ def api_shikimori_get_collection():
     return {
         "ok": True,
         "collection": analysis["groups"],
+        "missing_on_mal": analysis["missing_on_mal"],
         "stats": analysis["stats"],
         "fetched_at": results.get("generated_at")
     }
+
 
 @router.post("/api/shikimori/refresh")
 def api_shikimori_refresh():
