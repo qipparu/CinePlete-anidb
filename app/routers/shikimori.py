@@ -11,7 +11,7 @@ import yaml
 import xml.etree.ElementTree as ET
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, BackgroundTasks
 
 from app.logger import get_logger
 from app.config import load_config, save_config
@@ -21,8 +21,9 @@ from app.routers._shared import log, read_results
 router = APIRouter()
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
-MAPPING_CACHE_FILE = os.path.join(DATA_DIR, "shikimori_mappings_cache.json")
-EDITS_CACHE_FILE   = os.path.join(DATA_DIR, "shikimori_edits_cache.yaml")
+MAPPING_CACHE_FILE  = os.path.join(DATA_DIR, "shikimori_mappings_cache.json")
+EDITS_CACHE_FILE    = os.path.join(DATA_DIR, "shikimori_edits_cache.yaml")
+POSTERS_CACHE_FILE  = os.path.join(DATA_DIR, "shikimori_posters.json")
 
 @dataclass
 class ShikimoriMappingEntry:
@@ -318,14 +319,44 @@ class ShikimoriAnalyzer:
         self.tmdb = tmdb_manager
         self.library = library_snapshot
         self.mapper = get_shikimori_mapper()
-        self.owned_tmdb  = set(self.library.get("plex_ids", {}).keys())
         self.owned_anidb = set()
         self.owned_tvdb  = set()
-        for item in self.library.get("media_server", {}).get("anidb_items", []):
-            if item.get("anidb_id"):
-                self.owned_anidb.add(int(item["anidb_id"]))
-            if item.get("tvdb_id"):
-                self.owned_tvdb.add(int(item["tvdb_id"]))
+        
+        # Build poster lookup map
+        self.poster_lookup = {} # TMDB_ID -> URL
+        
+        # 1. From anidb_items (posters already extracted from media server)
+        for li in self.library.get("media_server", {}).get("anidb_items", []):
+            if li.get("anidb_id"):
+                self.owned_anidb.add(int(li["anidb_id"]))
+            if li.get("tvdb_id"):
+                self.owned_tvdb.add(int(li["tvdb_id"]))
+            
+            p = li.get("poster")
+            for tid in [li.get("tmdb_id")]:
+                if tid and p: self.poster_lookup[int(tid)] = p
+        
+        # 2. From suggestions (TMDB ID -> full poster path)
+        for s in self.library.get("suggestions", []):
+            tid = s.get("tmdb")
+            if tid and s.get("poster"):
+                self.poster_lookup[int(tid)] = s["poster"]
+                
+        # 3. From classics
+        for c in self.library.get("classics", []):
+            tid = c.get("tmdb")
+            if tid and c.get("poster"):
+                self.poster_lookup[int(tid)] = c["poster"]
+        
+        # 4. From persistent posters cache
+        try:
+            if os.path.exists(POSTERS_CACHE_FILE):
+                with open(POSTERS_CACHE_FILE, "r", encoding="utf-8") as f:
+                    p_cache = json.load(f)
+                    for tid, url in p_cache.items():
+                        if url: self.poster_lookup[int(tid)] = url
+        except Exception as e:
+            log.debug(f"Failed to load posters cache: {e}")
 
     def analyze(self, export_items: List[Dict[str, Any]]) -> Dict[str, Any]:
         groups = {"watching": [], "planned": [], "completed": [], "on_hold": [], "dropped": []}
@@ -365,18 +396,19 @@ class ShikimoriAnalyzer:
             if is_owned: stats["owned"] += 1
             else: stats["missing"] += 1
 
-            # Poster resolution: Library -> TMDB
+            # Poster resolution: Cache -> Library -> suggestions
             poster = None
+            tmdb_id = (mapping.tmdb_show_id[0] if mapping and mapping.tmdb_show_id else 
+                       (mapping.tmdb_movie_id[0] if mapping and mapping.tmdb_movie_id else None))
+            
             if lib_item and lib_item.get("poster"):
                 poster = lib_item["poster"]
-            elif mapping and self.tmdb:
-                tmdb_id = (mapping.tmdb_show_id[0] if mapping.tmdb_show_id else 
-                           (mapping.tmdb_movie_id[0] if mapping.tmdb_movie_id else None))
-                if tmdb_id:
-                    is_tv = bool(mapping.tmdb_show_id)
-                    res = self.tmdb.tv_show(tmdb_id) if is_tv else self.tmdb.movie(tmdb_id)
-                    if res and res.get("poster_path"):
-                        poster = f"https://image.tmdb.org/t/p/w342{res['poster_path']}"
+            elif tmdb_id and tmdb_id in self.poster_lookup:
+                poster = self.poster_lookup[int(tmdb_id)]
+            elif tmdb_id and self.tmdb:
+                # DONT make sequential network calls. 
+                # Instead just use placeholder and we'd eventually populate cache.
+                pass
 
             display_item = {
                 "mal_id": mal_id,
@@ -446,6 +478,59 @@ class ShikimoriAnalyzer:
         
         return {"stats": stats, "groups": groups, "missing_on_mal": missing_on_mal}
 
+    def fetch_missing_posters(self, export_items: List[Dict[str, Any]]):
+        """Background task to populate missing posters from TMDB API."""
+        if not self.tmdb: return
+        
+        updated = False
+        # Limit to watching/planned/on_hold to focus on relevant items first (prevents huge spam on first run)
+        relevant_statuses = ["watching", "planned", "on_hold"]
+        
+        for item in export_items:
+            if item.get("status") not in relevant_statuses: continue
+            
+            mal_id = item.get("target_id")
+            if not mal_id: continue
+            
+            mapping = self.mapper.lookup_mal(mal_id)
+            if not mapping: continue
+            
+            tmdb_id = (mapping.tmdb_show_id[0] if mapping.tmdb_show_id else 
+                       (mapping.tmdb_movie_id[0] if mapping.tmdb_movie_id else None))
+            
+            if not tmdb_id or int(tmdb_id) in self.poster_lookup: continue
+            
+            # Resolve it from TMDB API
+            is_tv = bool(mapping.tmdb_show_id)
+            try:
+                res = self.tmdb.tv_show(int(tmdb_id)) if is_tv else self.tmdb.movie(int(tmdb_id))
+                if res and res.get("poster_path"):
+                    url = f"https://image.tmdb.org/t/p/w342{res['poster_path']}"
+                    self.poster_lookup[int(tmdb_id)] = url
+                    updated = True
+                    log.debug(f"Resolved new poster for TMDB:{tmdb_id} -> {url}")
+            except Exception as e:
+                log.warning(f"Background fetch failed for TMDB:{tmdb_id} - {e}")
+        
+        if updated:
+            # Save back to persistent cache
+            try:
+                # Merge with existing file to be safe
+                existing = {}
+                if os.path.exists(POSTERS_CACHE_FILE):
+                    with open(POSTERS_CACHE_FILE, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                
+                # Convert keys to string for JSON
+                to_save = {str(k): v for k, v in self.poster_lookup.items()}
+                existing.update(to_save)
+                
+                with open(POSTERS_CACHE_FILE, "w", encoding="utf-8") as f:
+                    json.dump(existing, f)
+                log.info(f"Updated persistent poster cache with resolved items.")
+            except Exception as e:
+                log.error(f"Failed to save posters cache: {e}")
+
 
 
 # --------------------------------------------------
@@ -465,7 +550,7 @@ def api_shikimori_save_config(payload: dict = Body(...)):
     return {"ok": True}
 
 @router.get("/api/shikimori/collection")
-def api_shikimori_get_collection():
+def api_shikimori_get_collection(background_tasks: BackgroundTasks):
     cfg = load_config()
     shiki_cfg = cfg.get("SHIKIMORI", {})
     if not shiki_cfg.get("SHIKIMORI_ENABLED"):
@@ -486,6 +571,11 @@ def api_shikimori_get_collection():
     tmdb = TMDB(tmdb_api_key) if tmdb_api_key else None
     analyzer = ShikimoriAnalyzer(tmdb, results)
     analysis = analyzer.analyze(export_items)
+    
+    # Trigger background poster resolution to populate cache for future visits
+    if tmdb:
+        background_tasks.add_task(analyzer.fetch_missing_posters, export_items)
+
     return {
         "ok": True,
         "collection": analysis["groups"],
