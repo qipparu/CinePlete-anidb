@@ -123,10 +123,20 @@ async function testJellyfinConnection(){
 
 // Build library entry HTML
 function _libEntryHtml(lib, idx) {
-  const isPlex = (lib.type || "plex") === "plex"
+  const libType    = lib.type || "plex"
+  const isPlex     = libType === "plex"
+  const isEmby     = libType === "emby"
+  const serverName = isPlex ? "Plex" : isEmby ? "Emby" : "Jellyfin"
+
   const typeBadge = isPlex
     ? `<span style="background:#e5a00d;color:#000;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">PLEX</span>`
+    : isEmby
+    ? `<span style="background:#00A4DC;color:#fff;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">EMBY</span>`
     : `<span style="background:#7B2FBE;color:#fff;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">JELLYFIN</span>`
+
+  const urlPlaceholder = isPlex ? "http://plex:32400"
+                       : isEmby ? "http://emby:8096"
+                       : "http://jellyfin:8096"
 
   const credField = isPlex
     ? `<div class="form-group" style="margin-bottom:.5rem">
@@ -139,13 +149,13 @@ function _libEntryHtml(lib, idx) {
        </div>`
 
   return `
-  <div class="lib-entry" data-idx="${idx}" data-type="${lib.type||'plex'}"
+  <div class="lib-entry" data-idx="${idx}" data-type="${libType}"
        style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
               padding:1rem 1.2rem;margin-bottom:.75rem">
     <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem">
       ${typeBadge}
       <input id="lib_${idx}_label" value="${escHtml(lib.label||"")}"
-        placeholder="${isPlex?"Plex":"Jellyfin"} library label"
+        placeholder="${serverName} library label"
         style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--border2);
                color:var(--text);font-family:'DM Mono',monospace;font-size:.82rem;
                padding:2px 4px;outline:none"/>
@@ -161,7 +171,7 @@ function _libEntryHtml(lib, idx) {
     <div class="form-group" style="margin-bottom:.5rem">
       <label class="form-label" style="font-size:.72rem">URL</label>
       <input id="lib_${idx}_url" type="url" value="${escHtml(lib.url||"")}"
-        placeholder="${isPlex?"http://plex:32400":"http://jellyfin:8096"}"
+        placeholder="${urlPlaceholder}"
         style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
                color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
                padding:.4rem .65rem;box-sizing:border-box"/>
@@ -170,12 +180,12 @@ function _libEntryHtml(lib, idx) {
     <div class="form-group" style="margin-bottom:.5rem">
       <label class="form-label" style="font-size:.72rem">Library Name</label>
       <input id="lib_${idx}_library" value="${escHtml(lib.library_name||"")}"
-        placeholder="${isPlex?"Movies":"Movies"}"
+        placeholder="Movies"
         style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
                color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
                padding:.4rem .65rem;box-sizing:border-box"/>
       <div style="font-size:.68rem;color:var(--text3);margin-top:.2rem">
-        Exact name of the library in ${isPlex?"Plex":"Jellyfin"} (e.g. "Movies"). Case-sensitive.
+        Exact name of the library in ${serverName} (e.g. "Movies"). Case-sensitive.
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:.5rem;margin-top:.25rem">
@@ -364,6 +374,8 @@ function renderConfig(){
             onclick="addLibEntry('plex')">+ Add Plex</button>
           <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(123,47,190,.3);color:#9B5FDE"
             onclick="addLibEntry('jellyfin')">+ Add Jellyfin</button>
+          <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(0,164,220,.3);color:#00A4DC"
+            onclick="addLibEntry('emby')">+ Add Emby</button>
         </div>
         <p style="font-size:.7rem;color:var(--text3);margin:.5rem 0 0">
           All enabled libraries are scanned in parallel and merged by TMDB ID.
@@ -477,7 +489,7 @@ function renderConfig(){
         ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_wh_enabled", "Enabled", wh.WEBHOOK_ENABLED)}
         ${field("cfg_wh_secret",  "Secret (optional)", wh.WEBHOOK_SECRET||"", "secret")}
-        ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
+        ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin/Emby to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
       </div>
 
       <div class="form-section">
@@ -538,6 +550,15 @@ async function saveConfig(){
         JELLYFIN_LIBRARY_NAME: j.library_name,
         JELLYFIN_PAGE_SIZE: j.page_size || 500, SHORT_MOVIE_LIMIT: j.short_movie_limit || 60,
       } : (CONFIG?.JELLYFIN || {})
+    })(),
+    EMBY: (() => {
+      const libs = _collectLibraries()
+      const e = libs.find(l => l.type === "emby")
+      return e ? {
+        EMBY_URL: e.url, EMBY_API_KEY: e.api_key,
+        EMBY_LIBRARY_NAME: e.library_name,
+        EMBY_PAGE_SIZE: e.page_size || 500, SHORT_MOVIE_LIMIT: e.short_movie_limit || 60,
+      } : (CONFIG?.EMBY || {})
     })(),
     TMDB:{
       TMDB_API_KEY: v("cfg_tmdb_key"),
