@@ -114,7 +114,7 @@ function renderDashboard(){
   }))
   const topGenres=Object.entries(genreCounts)
     .sort((a,b)=>b[1]-a[1]).slice(0,8)
-    .map(([id,n])=>({name:GENRE_MAP[id],count:n}))
+    .map(([id,n])=>({id, name:GENRE_MAP[id], count:n}))
 
   // Top incomplete franchises (by absolute missing count)
   const topIncomplete=activeFranchises
@@ -219,7 +219,8 @@ function renderDashboard(){
       <div class="franchise-bars">
         ${topIncomplete.map(f=>{
           const pct=f.total?Math.round((f.have/f.total)*100):100
-          return `<div class="fbr" onclick="setActiveTab('franchises')" style="cursor:pointer">
+          const jsName = f.name.replace(/\\/g,"\\\\").replace(/'/g,"\\'")
+          return `<div class="fbr" onclick="navigateToGroupTab('franchises','${jsName}')" style="cursor:pointer">
             <div class="fbr-header">
               <span class="fbr-name" title="${escHtml(f.name)}">${escHtml(f.name)}</span>
               <span class="fbr-count">${f.have}/${f.total}</span>
@@ -281,7 +282,8 @@ function renderDashboard(){
       ["#22c55e","#F5C518","#ef4444"],i=>{ if(i===1) setActiveTab("notmdb"); else if(i===2) setActiveTab("nomatch") }
     ))
 
-    // Missing by decade
+    // Missing by decade — clicking navigates to Suggestions filtered by that decade
+    const decadeToYear={"2020s":"2020s","2010s":"2010s","2000s":"2000s","1990s":"1990s","1980s":"older","1970s":"older","Pre-1970":"older"}
     const dLabels=Object.keys(decades).filter(k=>decades[k]>0)
     mkChart("cDecade",{
       type:"bar",
@@ -294,11 +296,16 @@ function renderDashboard(){
           x:{grid:{display:false},ticks:{color:"#9090a0"}},
           y:{grid:{color:"#1a1a1e"},ticks:{color:"#606070",precision:0}}
         },
-        plugins:{legend:{display:false}}
+        plugins:{legend:{display:false}},
+        onClick:(e,els)=>{
+          if(!els.length) return
+          const decade = dLabels[els[0].index]
+          navigateToSuggestions({ year: decadeToYear[decade]||"" })
+        }
       }
     })
 
-    // Genre gap
+    // Genre gap — clicking navigates to Suggestions filtered by that genre
     mkChart("cGenre",{
       type:"bar",
       data:{labels:topGenres.map(g=>g.name),datasets:[{data:topGenres.map(g=>g.count),
@@ -310,11 +317,16 @@ function renderDashboard(){
           x:{grid:{color:"#1a1a1e"},ticks:{color:"#606070",precision:0}},
           y:{grid:{display:false},ticks:{color:"#9090a0"}}
         },
-        plugins:{legend:{display:false}}
+        plugins:{legend:{display:false}},
+        onClick:(e,els)=>{
+          if(!els.length) return
+          const gid = topGenres[els[0].index]?.id
+          if(gid) navigateToSuggestions({ genreId: String(gid) })
+        }
       }
     })
 
-    // Top actors
+    // Top actors — clicking a bar deep-links to Actors tab filtered to that actor
     mkChart("cActors",{
       type:"bar",
       data:{labels:topActors.map(a=>a.name),datasets:[{data:topActors.map(a=>a.count),
@@ -326,7 +338,12 @@ function renderDashboard(){
           x:{grid:{color:"#1a1a1e"},ticks:{color:"#606070"}},
           y:{grid:{display:false},ticks:{color:"#9090a0"}}
         },
-        plugins:{legend:{display:false}}
+        plugins:{legend:{display:false}},
+        onClick:(e,els)=>{
+          if(!els.length) return
+          const name = topActors[els[0].index]?.name
+          if(name) navigateToGroupTab("actors", name)
+        }
       }
     })
 
@@ -359,7 +376,7 @@ function renderDashboard(){
 
 /* ── Grouped list (franchises / directors / actors) ─────── */
 
-function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg }){
+function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg, showHave = false }){
   const c           = document.getElementById("content")
   const groupFilter = getGroupFilter()
   const sort        = getSort()
@@ -388,10 +405,27 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
       sorted = sorted.filter(m => (m.genre_ids||[]).includes(parseInt(genreFilter)))
     }
 
+    const ratingMin = getRatingFilter()
+    if (ratingMin > 0) {
+      sorted = sorted.filter(m => (m.rating||0) >= ratingMin)
+    }
+
     if (!sorted.length) return
 
     const groupTab = `${ACTIVE_TAB}-${name}`
     const { slice, btn: moreBtn } = _paginate(sorted, groupTab)
+
+    const haveList    = (showHave && g.have_list) ? g.have_list : []
+    const haveSection = haveList.length
+      ? `<details class="have-section">
+           <summary style="cursor:pointer;font-size:.73rem;color:var(--text3);margin:.5rem 0 .4rem;user-select:none">
+             ▸ In your library (${haveList.length})
+           </summary>
+           <div class="grid-posters" style="opacity:.45;pointer-events:none">
+             ${haveList.map(m => posterCard(m)).join("")}
+           </div>
+         </details>`
+      : ""
 
     html += `
     <div class="mb-group" style="margin-bottom:2rem">
@@ -407,6 +441,7 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg 
       </div>
       <div class="grid-posters">${slice.map(m=>posterCard(m)).join("")}</div>
       ${moreBtn}
+      ${haveSection}
     </div>`
   })
 
@@ -436,7 +471,8 @@ function renderDirectors(){
 function renderActors(){
   renderGroupedList({
     groups: DATA.actors||[], nameKey:"name", nameIcon:"🎭",
-    ignoreHandler:"ignoreActor", emptyMsg:"No actor suggestions found"
+    ignoreHandler:"ignoreActor", emptyMsg:"No actor suggestions found",
+    showHave: true,
   })
 }
 

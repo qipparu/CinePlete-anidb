@@ -7,8 +7,44 @@
 /* ── Batch selection state ──────────────────────────────────── */
 
 const _selected = new Map() // tmdb_id → movie object
+let _lastSelectedTmdb = null  // for Shift+click range selection
 
-function toggleSelect(tmdb, m, checkbox) {
+function toggleSelect(tmdb, m, checkbox, event) {
+  const shiftHeld = event?.shiftKey
+
+  if (shiftHeld && _lastSelectedTmdb && _lastSelectedTmdb !== tmdb) {
+    // Range-select: find all .pc cards visible in DOM order
+    const allCards = Array.from(document.querySelectorAll(".pc[data-tmdb]"))
+    const ids = allCards.map(c => parseInt(c.dataset.tmdb))
+    const fromIdx = ids.indexOf(_lastSelectedTmdb)
+    const toIdx   = ids.indexOf(tmdb)
+    if (fromIdx !== -1 && toIdx !== -1) {
+      const lo = Math.min(fromIdx, toIdx)
+      const hi = Math.max(fromIdx, toIdx)
+      const selecting = !_selected.has(tmdb) // match target card's final state
+      for (let i = lo; i <= hi; i++) {
+        const card  = allCards[i]
+        const cTmdb = ids[i]
+        const cChk  = card.querySelector(".pc-check")
+        if (selecting) {
+          // pull movie data from the card's checkbox data-movie attribute
+          let cMovie = { tmdb: cTmdb }
+          try { cMovie = JSON.parse(cChk?.dataset?.movie || "{}") } catch {}
+          _selected.set(cTmdb, cMovie)
+          card.classList.add("selected")
+          if (cChk) cChk.checked = true
+        } else {
+          _selected.delete(cTmdb)
+          card.classList.remove("selected")
+          if (cChk) cChk.checked = false
+        }
+      }
+      _lastSelectedTmdb = tmdb
+      updateBatchBar()
+      return
+    }
+  }
+
   if (_selected.has(tmdb)) {
     _selected.delete(tmdb)
     checkbox.closest(".pc")?.classList.remove("selected")
@@ -16,11 +52,13 @@ function toggleSelect(tmdb, m, checkbox) {
     _selected.set(tmdb, m)
     checkbox.closest(".pc")?.classList.add("selected")
   }
+  _lastSelectedTmdb = tmdb
   updateBatchBar()
 }
 
 function clearSelection() {
   _selected.clear()
+  _lastSelectedTmdb = null
   document.querySelectorAll(".pc-check").forEach(c => {
     c.checked = false
     c.closest(".pc")?.classList.remove("selected")
@@ -257,13 +295,35 @@ async function addToRadarr4k(tmdb, title, btn){
   }
 }
 
+/* ── Seerr requested state (localStorage) ──────────────────── */
+
+function _makeSeerrStore(key) {
+  let _s = null
+  return {
+    load() {
+      if (!_s) {
+        try { _s = new Set(JSON.parse(localStorage.getItem(key) || "[]")) }
+        catch { _s = new Set() }
+      }
+      return _s
+    },
+    add(tmdb)  { this.load().add(tmdb);  this._save() },
+    has(tmdb)  { return this.load().has(tmdb) },
+    _save()    { try { localStorage.setItem(key, JSON.stringify([...this.load()])) } catch {} },
+  }
+}
+const overseerrRequested   = _makeSeerrStore("cp-overseerr-requested")
+const jellyseerrRequested  = _makeSeerrStore("cp-jellyseerr-requested")
+
 async function addToOverseerr(tmdb, title, btn){
   btn.disabled = true; btn.textContent = "…"
   const res = await api("/api/overseerr/add","POST",{tmdb,title})
   if (res.ok){
+    overseerrRequested.add(tmdb)
     btn.textContent = "✓ Requested"
     btn.className   = "btn-sm"
     btn.style.color = "var(--green)"
+    btn.disabled    = true
     toast(`${title} → Overseerr`,"success")
   } else {
     btn.textContent = "✗"; btn.disabled = false
@@ -275,9 +335,11 @@ async function addToJellyseerr(tmdb, title, btn){
   btn.disabled = true; btn.textContent = "…"
   const res = await api("/api/jellyseerr/add","POST",{tmdb,title})
   if (res.ok){
+    jellyseerrRequested.add(tmdb)
     btn.textContent = "✓ Requested"
     btn.className   = "btn-sm"
     btn.style.color = "var(--green)"
+    btn.disabled    = true
     toast(`${title} → Jellyseerr`,"success")
   } else {
     btn.textContent = "✗"; btn.disabled = false
