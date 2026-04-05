@@ -167,16 +167,28 @@ function _libEntryHtml(lib, idx) {
                padding:.4rem .65rem;box-sizing:border-box"/>
     </div>
     ${credField}
-    <div class="form-group" style="margin-bottom:.5rem">
-      <label class="form-label" style="font-size:.72rem">Library Name</label>
-      <input id="lib_${idx}_library" value="${escHtml(lib.library_name||"")}"
-        placeholder="${isPlex?"Movies":"Movies"}"
-        style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
-               color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
-               padding:.4rem .65rem;box-sizing:border-box"/>
-      <div style="font-size:.68rem;color:var(--text3);margin-top:.2rem">
-        Exact name of the library in ${isPlex?"Plex":"Jellyfin"} (e.g. "Movies"). Case-sensitive.
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.5rem">
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label" style="font-size:.72rem">Library Name</label>
+        <input id="lib_${idx}_library" value="${escHtml(lib.library_name||"")}"
+          placeholder="${isPlex?"Movies":"Movies"}"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+                 color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
+                 padding:.4rem .65rem;box-sizing:border-box"/>
       </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label" style="font-size:.72rem">Content Type</label>
+        <select id="lib_${idx}_content_type"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+                 color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
+                 padding:.4rem .65rem;box-sizing:border-box;outline:none">
+          <option value="movies" ${(!lib.content_type || lib.content_type==="movies")?"selected":""}>Movies</option>
+          <option value="shows" ${lib.content_type==="shows"?"selected":""}>TV Shows (Anime)</option>
+        </select>
+      </div>
+    </div>
+    <div style="font-size:.68rem;color:var(--text3);margin-top:0;margin-bottom:.5rem">
+      Exact name of the library in ${isPlex?"Plex":"Jellyfin"} (e.g. "Movies"). Case-sensitive.
     </div>
     <div style="display:flex;align-items:center;gap:.5rem;margin-top:.25rem">
       <button class="btn-sm" style="font-size:.72rem;padding:5px 14px"
@@ -209,6 +221,7 @@ function addLibEntry(type) {
     token: "",
     api_key: "",
     library_name: "Movies",
+    content_type: "movies",
     page_size: 500,
     short_movie_limit: 60,
   }
@@ -262,6 +275,7 @@ function _collectLibraries() {
       label:          document.getElementById(`lib_${idx}_label`)?.value?.trim() || "",
       url:            document.getElementById(`lib_${idx}_url`)?.value?.trim() || "",
       library_name:   document.getElementById(`lib_${idx}_library`)?.value?.trim() || "",
+      content_type:   document.getElementById(`lib_${idx}_content_type`)?.value || "movies",
       page_size:      500,
       short_movie_limit: 60,
     }

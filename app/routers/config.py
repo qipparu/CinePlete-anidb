@@ -123,7 +123,7 @@ def library_test(payload: dict = Body(...)):
                 return {"ok": False, "error": f"Plex returned HTTP {code}"}
             root = _ET.fromstring(xml)
             libs = [d.attrib.get("title","") for d in root.findall("Directory")
-                    if d.attrib.get("type") == "movie"]
+                    if d.attrib.get("type") in ("movie", "show")]
             if lib and lib not in libs:
                 return {"ok": False, "error": f"Library '{lib}' not found. Available: {', '.join(libs) or 'none'}"}
             return {"ok": True, "libraries": libs}
