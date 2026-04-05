@@ -132,7 +132,7 @@ class TestScanMovies:
     def test_returns_correct_tuple_structure(self, monkeypatch):
         import app.jellyfin_api as jf
         self._patch(monkeypatch, [([_make_movie(1, duration_ticks=_LONG_MOVIE_TICKS)], 1)])
-        media_ids, directors, actors, stats, no_tmdb = jf.scan_movies()
+        media_ids, directors, actors, stats, no_tmdb, media_types = jf.scan_movies()
 
         assert isinstance(media_ids,  dict)
         assert isinstance(directors,  dict)
@@ -153,7 +153,7 @@ class TestScanMovies:
         import app.jellyfin_api as jf
         short = _make_movie(99, duration_ticks=_SHORT_MOVIE_TICKS)
         self._patch(monkeypatch, [([short], 1)])
-        media_ids, _, _, stats, _ = jf.scan_movies()
+        media_ids, _, _, stats, _, _ = jf.scan_movies()
 
         assert 99 not in media_ids
         assert stats["skipped_short"] == 1
@@ -163,7 +163,7 @@ class TestScanMovies:
         movie = _make_movie(0, duration_ticks=_LONG_MOVIE_TICKS)
         movie["ProviderIds"] = {}   # no TMDB id
         self._patch(monkeypatch, [([movie], 1)])
-        media_ids, _, _, _, no_tmdb = jf.scan_movies()
+        media_ids, _, _, _, no_tmdb, _ = jf.scan_movies()
 
         assert len(media_ids) == 0
         assert len(no_tmdb)   == 1
@@ -173,7 +173,7 @@ class TestScanMovies:
         movie = _make_movie(0, duration_ticks=_LONG_MOVIE_TICKS)
         movie["ProviderIds"] = {"Tmdb": "not-a-number"}
         self._patch(monkeypatch, [([movie], 1)])
-        _, _, _, _, no_tmdb = jf.scan_movies()
+        _, _, _, _, no_tmdb, _ = jf.scan_movies()
 
         assert len(no_tmdb) == 1
 
@@ -193,7 +193,7 @@ class TestScanMovies:
         movie = _make_movie(8, duration_ticks=_LONG_MOVIE_TICKS)
         movie["RunTimeTicks"] = None
         self._patch(monkeypatch, [([movie], 1)])
-        _, _, _, stats, _ = jf.scan_movies()
+        _, _, _, stats, _, _ = jf.scan_movies()
 
         # duration_min = 0, condition is "if duration_min and duration_min < limit"
         # 0 is falsy → NOT skipped as short, movie is indexed
@@ -205,7 +205,7 @@ class TestScanMovies:
         m2 = _make_movie(2, duration_ticks=_LONG_MOVIE_TICKS, directors=("Kubrick",), actors=())
         m3 = _make_movie(3, duration_ticks=_LONG_MOVIE_TICKS, directors=("Spielberg",), actors=())
         self._patch(monkeypatch, [([m1, m2, m3], 3)])
-        _, directors, _, _, _ = jf.scan_movies()
+        _, directors, _, _, _, _ = jf.scan_movies()
 
         assert "Kubrick"   in directors     # 2 films
         assert "Spielberg" not in directors  # only 1 film
@@ -215,7 +215,7 @@ class TestScanMovies:
         m1 = _make_movie(1, duration_ticks=_LONG_MOVIE_TICKS, directors=(), actors=("De Niro",))
         m2 = _make_movie(2, duration_ticks=_LONG_MOVIE_TICKS, directors=(), actors=("De Niro", "Pacino"))
         self._patch(monkeypatch, [([m1, m2], 2)])
-        _, _, actors, _, _ = jf.scan_movies()
+        _, _, actors, _, _, _ = jf.scan_movies()
 
         assert "De Niro" in actors
         assert "Pacino"  not in actors  # only 1 film
@@ -227,7 +227,7 @@ class TestScanMovies:
         m1 = _make_movie(1, duration_ticks=_LONG_MOVIE_TICKS, directors=(), actors=many_actors)
         m2 = _make_movie(2, duration_ticks=_LONG_MOVIE_TICKS, directors=(), actors=many_actors)
         self._patch(monkeypatch, [([m1, m2], 2)])
-        _, _, actors, _, _ = jf.scan_movies()
+        _, _, actors, _, _, _ = jf.scan_movies()
 
         # Only top 5 actors per film are indexed, so max 5 actors kept
         assert len(actors) <= 5
@@ -235,7 +235,7 @@ class TestScanMovies:
     def test_stats_fields_present(self, monkeypatch):
         import app.jellyfin_api as jf
         self._patch(monkeypatch, [([_make_movie(1, duration_ticks=_LONG_MOVIE_TICKS)], 1)])
-        _, _, _, stats, _ = jf.scan_movies()
+        _, _, _, stats, _, _ = jf.scan_movies()
 
         for key in ("scanned_items", "indexed_tmdb", "skipped_short",
                     "directors_kept", "actors_kept", "no_tmdb_guid"):
@@ -256,7 +256,7 @@ class TestScanMovies:
     def test_empty_library_returns_empty_results(self, monkeypatch):
         import app.jellyfin_api as jf
         self._patch(monkeypatch, [([], 0)])
-        media_ids, directors, actors, stats, no_tmdb = jf.scan_movies()
+        media_ids, directors, actors, stats, no_tmdb, media_types = jf.scan_movies()
 
         assert media_ids  == {}
         assert directors  == {}

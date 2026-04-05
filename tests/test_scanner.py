@@ -265,9 +265,10 @@ class TestWriteResults(unittest.TestCase):
 
 class TestAnalyzeCollections(unittest.TestCase):
 
-    def _run(self, plex_ids, tmdb, ignore_franchises=None, ignore_movies=None, wishlist_movies=None):
+    def _run(self, plex_ids, tmdb, ignore_franchises=None, ignore_movies=None, wishlist_movies=None, plex_types=None):
         return _analyze_collections(
             plex_ids,
+            plex_types or {},
             tmdb,
             ignore_franchises or set(),
             ignore_movies or set(),
@@ -348,14 +349,17 @@ class TestAnalyzeCollections(unittest.TestCase):
 
 class TestAnalyzeDirectors(unittest.TestCase):
 
-    def _run(self, directors_map, plex_ids, tmdb, ignore_directors=None, ignore_movies=None, wishlist_movies=None):
+    def _run(self, directors_map, plex_ids, tmdb, ignore_directors=None, ignore_movies=None, wishlist_movies=None, plex_types=None, min_votes=1, max_per_director=10):
         return _analyze_directors(
             directors_map,
             plex_ids,
+            plex_types or {},
             tmdb,
             ignore_directors or set(),
             ignore_movies or set(),
             wishlist_movies or set(),
+            min_votes,
+            max_per_director,
         )
 
     def test_director_in_ignore_list_skipped(self):
@@ -481,10 +485,11 @@ class TestBuildClassics(unittest.TestCase):
 class TestBuildSuggestions(unittest.TestCase):
 
     def _run(self, plex_ids, tmdb, overrides=None, ignore_movies=None,
-             wishlist_movies=None, max_results=10, min_score=2):
+             wishlist_movies=None, max_results=10, min_score=2, plex_types=None):
         with patch("app.scanner.save_json"), patch("app.scanner.OVERRIDES_FILE", "/tmp/ov.json"):
             return _build_suggestions(
                 plex_ids,
+                plex_types or {},
                 tmdb,
                 overrides or {"rec_fetched_ids": []},
                 ignore_movies or set(),
@@ -552,10 +557,11 @@ class TestBuildSuggestions(unittest.TestCase):
 class TestAnalyzeActors(unittest.TestCase):
 
     def _run(self, actors_map, plex_ids, tmdb, ignore_actors=None,
-             ignore_movies=None, wishlist_movies=None, min_votes=100, max_per_actor=10):
+             ignore_movies=None, wishlist_movies=None, min_votes=100, max_per_actor=10, plex_types=None):
         return _analyze_actors(
             actors_map,
             plex_ids,
+            plex_types or {},
             tmdb,
             ignore_actors or set(),
             ignore_movies or set(),
