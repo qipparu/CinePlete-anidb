@@ -43,6 +43,75 @@ def library_key(lib_cfg=None):
     raise RuntimeError(f"Plex library '{lc['library_name']}' not found on {lc['url']}")
 
 
+def _extract_guids(element) -> dict:
+    """
+    Extract tmdb_id, anidb_id, tvdb_id from a Plex XML element.
+
+    Supports TWO formats produced by different Plex agents:
+
+    1. Modern (new Plex TV/Movie agent) — child <Guid> elements:
+           <Guid id="tmdb://12345"/>
+           <Guid id="anidb://11370"/>
+           <Guid id="tvdb://78914"/>
+
+    2. Legacy HAMA agent — guid attribute on the element itself:
+           guid="com.plexapp.agents.hama://anidb-11370?lang=en"
+       HAMA also supports tvdb: scheme inside the value.
+
+    Returns a dict with nullable keys: tmdb_id (int|None), anidb_id (int|None), tvdb_id (int|None).
+    """
+    tmdb_id: int | None = None
+    anidb_id: int | None = None
+    tvdb_id:  int | None = None
+
+    # ── Modern: child <Guid id="..."> elements ──────────────────────────────
+    for g in element.findall("Guid"):
+        gid = g.attrib.get("id", "")
+        if gid.startswith("tmdb://"):
+            try:
+                tmdb_id = int(gid[7:])
+            except ValueError:
+                pass
+        elif gid.startswith("anidb://"):
+            try:
+                anidb_id = int(gid[8:])
+            except ValueError:
+                pass
+        elif gid.startswith("tvdb://"):
+            try:
+                tvdb_id = int(gid[7:])
+            except ValueError:
+                pass
+
+    # ── Legacy HAMA agent: guid attribute ───────────────────────────────────
+    # Format examples:
+    #   com.plexapp.agents.hama://anidb-11370?lang=en
+    #   com.plexapp.agents.hama://tvdb-78914/1/1?lang=en
+    raw_guid = element.attrib.get("guid", "")
+    if not any([tmdb_id, anidb_id, tvdb_id]) and "hama://" in raw_guid:
+        # Strip query string and scheme
+        # Format: com.plexapp.agents.hama://anidb-11370?lang=en
+        #         com.plexapp.agents.hama://tvdb-78914/1/1?lang=en
+        #         com.plexapp.agents.hama://tvdb2-78914/1/1?lang=en  (absolute numbering)
+        #         com.plexapp.agents.hama://tvdb6-78914?lang=en      (specials mapping)
+        hama_part = raw_guid.split("hama://")[1].split("?")[0]   # "anidb-11370" / "tvdb2-78914/1/1"
+        # Split on first "-" to get source type and the rest
+        hama_type, _, hama_rest = hama_part.partition("-")
+        hama_id_str = hama_rest.split("/")[0]   # take only series-level ID
+        if hama_id_str.isdigit():
+            # anidb, anidb2, anidb3… all map to anidb_id
+            if hama_type.startswith("anidb"):
+                anidb_id = int(hama_id_str)
+            # tvdb, tvdb2, tvdb3, tvdb4, tvdb6… all map to tvdb_id
+            elif hama_type.startswith("tvdb"):
+                tvdb_id = int(hama_id_str)
+            elif hama_type == "tmdb":
+                tmdb_id = int(hama_id_str)
+
+    return {"tmdb_id": tmdb_id, "anidb_id": anidb_id, "tvdb_id": tvdb_id}
+
+
+
 def scan_movies(lib_cfg=None):
     """
     Scan a Plex movie library (type=1).
@@ -99,24 +168,14 @@ def scan_movies(lib_cfg=None):
             title = v.attrib.get("title")
             year = v.attrib.get("year")
             duration_ms = v.attrib.get("duration")
-            duration_min = int(duration_ms) / 60000 if duration_ms else 0
-            if duration_min < short_movie_limit:
+            duration_min = int(duration_ms) / 60000 if duration_ms else None
+            if duration_min is not None and duration_min < short_movie_limit:
                 skipped_short += 1
                 continue
 
-            tmdb_id = None
-            anidb_raw = None
-
-            for g in v.findall("Guid"):
-                gid = g.attrib.get("id", "")
-                if gid.startswith("tmdb://"):
-                    try:
-                        tmdb_id = int(gid.split("tmdb://")[1])
-                    except Exception:
-                        tmdb_id = None
-                    break
-                elif gid.startswith("anidb://"):
-                    anidb_raw = gid.split("anidb://")[1]
+            guids     = _extract_guids(v)
+            tmdb_id   = guids["tmdb_id"]
+            anidb_raw = str(guids["anidb_id"]) if guids["anidb_id"] else None
 
             # AniDB fallback for movie libraries
             if not tmdb_id and anidb_raw and anidb_raw.isdigit():
@@ -226,21 +285,10 @@ def scan_shows(lib_cfg=None):
             title = show.attrib.get("title", "")
             year  = show.attrib.get("year", "")
 
-            tmdb_id  = None
-            anidb_raw = None
-            tvdb_raw  = None
-
-            for g in show.findall("Guid"):
-                gid = g.attrib.get("id", "")
-                if gid.startswith("tmdb://"):
-                    try:
-                        tmdb_id = int(gid.split("tmdb://")[1])
-                    except Exception:
-                        pass
-                elif gid.startswith("anidb://"):
-                    anidb_raw = gid.split("anidb://")[1]
-                elif gid.startswith("tvdb://"):
-                    tvdb_raw = gid.split("tvdb://")[1]
+            guids     = _extract_guids(show)
+            tmdb_id   = guids["tmdb_id"]
+            anidb_raw = str(guids["anidb_id"]) if guids["anidb_id"] else None
+            tvdb_raw  = str(guids["tvdb_id"])  if guids["tvdb_id"]  else None
 
             # Resolve AniDB → tmdb & tvdb via mapper
             if anidb_raw and anidb_raw.isdigit():
