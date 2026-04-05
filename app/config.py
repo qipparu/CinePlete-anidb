@@ -51,6 +51,10 @@ DEFAULT_CONFIG = {
         "ACTOR_MIN_VOTES": 500,
         "ACTOR_MAX_RESULTS_PER_ACTOR": 10,
     },
+    "DIRECTOR_HITS": {
+        "DIRECTOR_MIN_VOTES": 1,
+        "DIRECTOR_MAX_RESULTS": 10,
+    },
     "SUGGESTIONS": {
         "SUGGESTIONS_MAX_RESULTS": 100,
         "SUGGESTIONS_MIN_SCORE": 2,    # min number of your films that must recommend it

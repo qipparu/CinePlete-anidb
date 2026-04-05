@@ -845,6 +845,7 @@ def build():
 
     classics_cfg    = cfg.get("CLASSICS", {})
     actor_hits_cfg  = cfg.get("ACTOR_HITS", {})
+    director_hits_cfg = cfg.get("DIRECTOR_HITS", {})
     suggestions_cfg = cfg.get("SUGGESTIONS", {})
     tmdb_cfg        = cfg.get("TMDB", {})
 
@@ -854,6 +855,8 @@ def build():
     classics_max_results        = int(classics_cfg.get("CLASSICS_MAX_RESULTS", 120))
     actor_min_votes             = int(actor_hits_cfg.get("ACTOR_MIN_VOTES", 500))
     actor_max_results_per_actor = int(actor_hits_cfg.get("ACTOR_MAX_RESULTS_PER_ACTOR", 10))
+    director_min_votes          = int(director_hits_cfg.get("DIRECTOR_MIN_VOTES", 1))
+    director_max_results        = int(director_hits_cfg.get("DIRECTOR_MAX_RESULTS", 10))
     suggestions_max_results     = int(suggestions_cfg.get("SUGGESTIONS_MAX_RESULTS", 100))
     suggestions_min_score       = int(suggestions_cfg.get("SUGGESTIONS_MIN_SCORE", 2))
     tmdb_api_key                = tmdb_cfg.get("TMDB_API_KEY")
@@ -997,7 +1000,7 @@ def build():
     _set_step(4, f"{len(directors_map)} directors")
     directors, director_missing_total = _analyze_directors(
         directors_map, plex_ids, plex_types, tmdb, ignore_directors, ignore_movies, wishlist_movies,
-        directors_min_votes, directors_max_results
+        director_min_votes, director_max_results
     )
 
     # ---- CLASSICS ---------------------------------------------
@@ -1017,7 +1020,7 @@ def build():
     _set_step(6, f"{len(actors_map)} actors")
     actors, actor_missing_total = _analyze_actors(
         actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignore_movies, wishlist_movies,
-        actors_min_votes, actors_max_results
+        actor_min_votes, actor_max_results_per_actor
     )
 
     # ---- WISHLIST ---------------------------------------------
