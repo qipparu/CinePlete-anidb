@@ -309,7 +309,10 @@ def scan_shows(lib_cfg=None):
                 if tmdb_id not in plex_ids:
                     plex_ids[tmdb_id] = title
             else:
-                no_tmdb_guid.append({"title": title, "year": year, "source": "anidb" if anidb_raw else "unknown"})
+                # If it's an anime that mapped to anidb/tvdb successfully, don't flag as missing
+                if not (anidb_raw and anidb_raw.isdigit() and entry):
+                    no_tmdb_guid.append({"title": title, "year": year, "source": "anidb" if anidb_raw else "unknown"})
+
 
         start += len(shows)
 

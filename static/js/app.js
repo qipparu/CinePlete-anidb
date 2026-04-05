@@ -16,6 +16,7 @@ const PAGE_TITLES = {
   classics:    "Classics",
   suggestions: "Suggestions",
   anime:       "Anime Seasons",
+  anime_franchises: "Anime Franchises",
   notmdb:      "No TMDB GUID",
   nomatch:     "TMDB No Match",
   duplicates:  "Multi-Version",
@@ -62,6 +63,7 @@ function render(){
   if (ACTIVE_TAB==="classics")    return renderClassics()
   if (ACTIVE_TAB==="suggestions") return renderSuggestions()
   if (ACTIVE_TAB==="anime")       return renderAnime()
+  if (ACTIVE_TAB==="anime_franchises") return renderAnimeFranchises()
   if (ACTIVE_TAB==="notmdb")      return renderNoTmdb()
   if (ACTIVE_TAB==="nomatch")     return renderNoMatch()
   if (ACTIVE_TAB==="duplicates")  return renderDuplicates()

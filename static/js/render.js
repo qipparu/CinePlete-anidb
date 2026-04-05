@@ -457,6 +457,13 @@ function renderFranchises(){
   })
 }
 
+function renderAnimeFranchises(){
+  renderGroupedList({
+    groups: DATA.anime_franchises||[], nameKey:"name", nameIcon:"🌸",
+    ignoreHandler:"ignoreFranchise", emptyMsg:"No missing anime franchises 🎉"
+  })
+}
+
 /* ── Directors ───────────────────────────────────────────── */
 
 function renderDirectors(){
@@ -608,10 +615,10 @@ function _animeSetMode(mode){
 }
 
 function _animeGridCard(show){
-  const missing = show.missing_seasons || []
-  const have    = show.seasons_have    || []
-  const total   = show.seasons_count   || (have.length + missing.length)
-  const pct     = total ? Math.round((have.length / total) * 100) : 100
+  const missingCount = show.seasons_missing_count || 0
+  const haveCount    = show.seasons_have_count || 0
+  const total   = show.seasons_count   || (haveCount + missingCount)
+  const pct     = total ? Math.round((haveCount / total) * 100) : 100
 
   const imgHtml = show.poster
     ? `<img class="pc-img" src="${show.poster}" loading="lazy" alt=""/>`
@@ -627,7 +634,7 @@ function _animeGridCard(show){
       <div class="pc-info">
         <div class="pc-title" title="${escHtml(show.name)}">${escHtml(show.name)}</div>
         <div class="pc-meta">
-          <span style="color:${color};font-weight:500">${have.length}/${total}</span>
+          <span style="color:${color};font-weight:500">${haveCount}/${total}</span>
           <span>seasons</span>
         </div>
         <div style="height:3px;background:var(--border);border-radius:3px;margin-top:.4rem;overflow:hidden">
@@ -637,21 +644,24 @@ function _animeGridCard(show){
       <div class="pc-overlay">
         <div class="pc-overlay-title">${escHtml(show.name)}</div>
         <div class="pc-overlay-actions">
-          ${missing.length
-            ? `<span style="color:var(--red);font-size:.62rem">✗ ${missing.length} missing</span>`
+          ${missingCount
+            ? `<span style="color:var(--red);font-size:.62rem">✗ ${missingCount} missing</span>`
             : `<span style="color:var(--green);font-size:.62rem">✓ Complete!</span>`}
           ${show.tvdb_id ? `<a href="https://thetvdb.com/?id=${show.tvdb_id}&tab=series" target="_blank" rel="noopener"
-              style="color:var(--gold);font-size:.6rem;text-decoration:none">TVDB ↗</a>` : ""}
+              style="color:var(--text);font-size:.62rem;text-decoration:underline">TVDB ↗</a>` : ""}
         </div>
       </div>
     </div>`
 }
 
 function _animeListCard(show){
+  const missingCount = show.seasons_missing_count || 0
+  const haveCount    = show.seasons_have_count || 0
+  const total   = show.seasons_count   || (haveCount + missingCount)
+  const pct     = total ? Math.round((haveCount / total) * 100) : 100
+
   const missing = show.missing_seasons || []
   const have    = show.seasons_have    || []
-  const total   = show.seasons_count   || (have.length + missing.length)
-  const pct     = total ? Math.round((have.length / total) * 100) : 100
 
   const color = pct === 100 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)"
 
@@ -685,7 +695,7 @@ function _animeListCard(show){
       <div style="flex:1;min-width:0">
         <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem;flex-wrap:wrap">
           <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.95rem;color:var(--text)">${escHtml(show.name)}</span>
-          <span style="color:${color};font-size:.72rem;font-weight:500">${have.length}/${total} seasons</span>
+          <span style="color:${color};font-size:.72rem;font-weight:500">${haveCount}/${total} seasons</span>
           ${show.tvdb_id ? `<a href="https://thetvdb.com/?id=${show.tvdb_id}&tab=series" target="_blank" rel="noopener"
               style="margin-left:auto;color:var(--text3);font-size:.65rem;text-decoration:none;flex-shrink:0">TVDB:${show.tvdb_id} ↗</a>` : ""}
           ${show.tmdb_id ? `<a href="https://www.themoviedb.org/tv/${show.tmdb_id}" target="_blank" rel="noopener"

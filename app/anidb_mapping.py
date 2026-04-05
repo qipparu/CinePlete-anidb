@@ -34,8 +34,13 @@ ANIMELISTS_URL = (
     "https://raw.githubusercontent.com/Anime-Lists/anime-lists/"
     "master/anime-list-master.xml"
 )
+MOVIESETS_URL = (
+    "https://raw.githubusercontent.com/Anime-Lists/anime-lists/"
+    "master/anime-movieset-list.xml"
+)
 DATA_DIR   = os.getenv("DATA_DIR", "/data")
 CACHE_FILE = os.path.join(DATA_DIR, "animelists_cache.xml")
+CACHE_MOVIESET_FILE = os.path.join(DATA_DIR, "animemoviesets_cache.xml")
 
 _DEFAULT_TTL_DAYS = 7
 
@@ -82,45 +87,89 @@ class AniDBMapper:
         self._lock        = threading.Lock()
         self._forward:  dict[int, MappingEntry]       = {}   # anidb_id → entry
         self._reverse:  dict[int, list[MappingEntry]] = {}   # tvdb_id  → [entry, ...]
+        self._moviesets: dict[str, list[int]]         = {}   # collection_name -> [anidb_id, ...]
+        self._anidb_to_movieset: dict[int, str]       = {}   # anidb_id -> collection_name
         self._loaded_at: float = 0.0
         self._ready    : bool  = False
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _download_xml(self) -> Optional[str]:
+    def _download_xml(self, url: str, label: str) -> Optional[str]:
         """Fetch the master XML from GitHub. Returns raw XML text or None."""
         try:
-            log.info(f"Downloading anime-list-master.xml from {ANIMELISTS_URL}")
-            r = requests.get(ANIMELISTS_URL, timeout=60,
+            log.info(f"Downloading {label} from {url}")
+            r = requests.get(url, timeout=60,
                              headers={"User-Agent": "CinePlete/1.0 AniDB-mapper"})
             r.raise_for_status()
             return r.text
         except Exception as e:
-            log.warning(f"AniDB mapping: download failed — {e}")
+            log.warning(f"AniDB mapping: download failed for {label} — {e}")
             return None
 
-    def _load_from_cache(self) -> Optional[str]:
+    def _load_from_cache(self, path: str) -> Optional[str]:
         """Load XML text from the on-disk cache if it exists."""
         try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return f.read()
         except OSError:
             return None
 
-    def _save_cache(self, xml_text: str) -> None:
+    def _save_cache(self, path: str, xml_text: str) -> None:
         os.makedirs(DATA_DIR, exist_ok=True)
-        tmp = CACHE_FILE + ".tmp"
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(xml_text)
-        os.replace(tmp, CACHE_FILE)
-        log.debug("AniDB mapping: cache saved")
+        os.replace(tmp, path)
+        log.debug(f"AniDB mapping: cache saved to {path}")
 
-    def _cache_age_seconds(self) -> float:
+    def _cache_age_seconds(self, path: str) -> float:
         """Return age of on-disk cache in seconds, or infinity if absent."""
         try:
-            return time.time() - os.path.getmtime(CACHE_FILE)
+            return time.time() - os.path.getmtime(path)
         except OSError:
             return float("inf")
+
+    def _parse_moviesets(self, xml_text: str) -> dict:
+        """Parse anime-movieset-list.xml"""
+        moviesets = {}
+        anidb_to_movieset = {}
+
+        try:
+            root = ET.fromstring(xml_text.encode("utf-8"))
+        except Exception as e:
+            log.error(f"AniDB mapping: Movieset XML parse error — {e}")
+            return {"moviesets": moviesets, "anidb_to_movieset": anidb_to_movieset}
+            
+        for dset in root.iter("set"):
+            titles = dset.find("titles")
+            if titles is None:
+                continue
+                
+            # Find main title, or fallback to any title
+            name = None
+            for t in titles.iter("title"):
+                if t.get("type") == "main":
+                    name = t.text
+                    break
+            if not name and titles.find("title") is not None:
+                name = titles.find("title").text
+                
+            if not name:
+                continue
+                
+            anidb_ids = []
+            for anime in dset.iter("anime"):
+                aid = anime.get("anidbid")
+                if aid and aid.isdigit():
+                    aid_int = int(aid)
+                    anidb_ids.append(aid_int)
+                    anidb_to_movieset[aid_int] = name
+                    
+            if anidb_ids:
+                moviesets[name] = anidb_ids
+
+        log.info(f"AniDB mapping: parsed {len(moviesets)} movie sets")
+        return {"moviesets": moviesets, "anidb_to_movieset": anidb_to_movieset}
 
     def _parse(self, xml_text: str) -> dict:
         """Parse the XML and return forward / reverse dicts."""
@@ -183,6 +232,7 @@ class AniDBMapper:
                  f"{len(reverse)} unique TVDB IDs")
         return {"forward": forward, "reverse": reverse}
 
+
     # ── Public interface ──────────────────────────────────────────────────────
 
     def load(self) -> None:
@@ -191,50 +241,71 @@ class AniDBMapper:
         Called once on startup; idempotent if TTL has not expired.
         """
         with self._lock:
-            cache_age = self._cache_age_seconds()
+            cache_age = self._cache_age_seconds(CACHE_FILE)
+            moviesets_age = self._cache_age_seconds(CACHE_MOVIESET_FILE)
+            
             xml_text  = None
+            moviesets_text = None
 
             if cache_age < self._ttl_seconds:
-                # Cache is fresh — use it
-                xml_text = self._load_from_cache()
+                xml_text = self._load_from_cache(CACHE_FILE)
                 if xml_text:
                     log.info(f"AniDB mapping: using cached file "
                              f"(age {cache_age/3600:.1f}h < TTL {self._ttl_seconds/86400}d)")
+                             
+            if moviesets_age < self._ttl_seconds:
+                moviesets_text = self._load_from_cache(CACHE_MOVIESET_FILE)
 
             if xml_text is None:
-                # Cache missing or stale — download
-                xml_text = self._download_xml()
+                xml_text = self._download_xml(ANIMELISTS_URL, "anime-list-master.xml")
                 if xml_text:
-                    self._save_cache(xml_text)
+                    self._save_cache(CACHE_FILE, xml_text)
                 else:
-                    # Fallback to stale cache
-                    xml_text = self._load_from_cache()
-                    if xml_text:
-                        log.warning("AniDB mapping: download failed — using stale cache")
-                    else:
-                        log.error("AniDB mapping: no cache and download failed — "
-                                  "AniDB resolution disabled")
+                    xml_text = self._load_from_cache(CACHE_FILE)
+                    if not xml_text:
+                        log.error("AniDB mapping: no cache and download failed — AniDB disabled")
                         return
+
+            if moviesets_text is None:
+                moviesets_text = self._download_xml(MOVIESETS_URL, "anime-movieset-list.xml")
+                if moviesets_text:
+                    self._save_cache(CACHE_MOVIESET_FILE, moviesets_text)
+                else:
+                    moviesets_text = self._load_from_cache(CACHE_MOVIESET_FILE)
 
             parsed = self._parse(xml_text)
             self._forward   = parsed["forward"]
             self._reverse   = parsed["reverse"]
+            
+            if moviesets_text:
+                m_parsed = self._parse_moviesets(moviesets_text)
+                self._moviesets = m_parsed["moviesets"]
+                self._anidb_to_movieset = m_parsed["anidb_to_movieset"]
+                
             self._loaded_at = time.time()
             self._ready     = True
 
     def refresh(self) -> None:
         """Force a fresh download, ignoring TTL."""
         with self._lock:
-            xml_text = self._download_xml()
+            xml_text = self._download_xml(ANIMELISTS_URL, "anime-list-master.xml")
+            moviesets_text = self._download_xml(MOVIESETS_URL, "anime-movieset-list.xml")
+            
             if xml_text:
-                self._save_cache(xml_text)
+                self._save_cache(CACHE_FILE, xml_text)
                 parsed = self._parse(xml_text)
                 self._forward   = parsed["forward"]
                 self._reverse   = parsed["reverse"]
+                
+            if moviesets_text:
+                self._save_cache(CACHE_MOVIESET_FILE, moviesets_text)
+                m_parsed = self._parse_moviesets(moviesets_text)
+                self._moviesets = m_parsed["moviesets"]
+                self._anidb_to_movieset = m_parsed["anidb_to_movieset"]
+                
+            if xml_text or moviesets_text:
                 self._loaded_at = time.time()
                 self._ready     = True
-            else:
-                log.warning("AniDB mapping: refresh download failed — keeping current data")
 
     @property
     def ready(self) -> bool:
@@ -275,6 +346,14 @@ class AniDBMapper:
         """Shortcut: return just the TVDB ID for an AniDB ID, or None."""
         entry = self.lookup(anidb_id)
         return entry.tvdb_id if entry else None
+
+    def collection_for_anidb(self, anidb_id: int) -> Optional[str]:
+        """Return the movieset/collection name for a given AniDB ID, or None."""
+        return self._anidb_to_movieset.get(anidb_id)
+        
+    def collection_items(self, collection_name: str) -> list[int]:
+        """Return the list of all AniDB IDs in a specified movieset/collection."""
+        return self._moviesets.get(collection_name, [])
 
 
 # ──────────────────────────────────────────────────────────────────────────────

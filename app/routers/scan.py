@@ -166,7 +166,7 @@ def api_export(format: str = Query(default="csv"), tab: str = Query(default="wis
         movies = results.get("classics", [])
     elif tab == "suggestions":
         movies = results.get("suggestions", [])
-    elif tab in ("franchises", "directors", "actors"):
+    elif tab in ("franchises", "anime_franchises", "directors", "actors"):
         for g in results.get(tab, []):
             movies.extend(g.get("missing", []))
 
@@ -218,6 +218,9 @@ def api_search(q: str = Query(default="")):
     for f in results.get("franchises", []):
         for m in f.get("missing", []):
             _match(m, "franchises", f.get("name", ""))
+    for f in results.get("anime_franchises", []):
+        for m in f.get("missing", []):
+            _match(m, "anime_franchises", f.get("name", ""))
     for d in results.get("directors", []):
         for m in d.get("missing", []):
             _match(m, "directors", d.get("name", ""))

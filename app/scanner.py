@@ -556,31 +556,167 @@ def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
                 show_name  = tv_results[0].get("name") or show_name
                 poster_url = tmdb.poster_url(tv_results[0].get("poster_path"))
 
-        missing_seasons_total += len(missing_seasons)
+        unique_seasons = set()
+        valid_all_seasons = []
+        for e in all_seasons:
+            s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
+            if str(s_val) != "0":
+                unique_seasons.add(s_val)
+                valid_all_seasons.append(e)
+
+        valid_seasons_have = []
+        unique_have = set()
+        for e in seasons_have:
+            s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
+            if str(s_val) != "0":
+                unique_have.add(s_val)
+                valid_seasons_have.append(e)
+                
+        valid_missing_seasons = []
+        unique_missing = set()
+        for e in missing_seasons:
+            s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
+            if str(s_val) != "0":
+                unique_missing.add(s_val)
+                valid_missing_seasons.append(e)
+
+        # Some seasons might be partially had and partially missing, but
+        # we generally want to display the number of fully had/missing seasons or parts here.
+        # However, to be mathematically consistent, total = have + missing is best represented if we
+        # just do unique_missing and unique_have as separate logical counts.
+        
+        missing_seasons_total += len(unique_missing)
+        
+        # If there are no actual seasons (e.g. only specials), we still might want to list it or maybe skip entirely.
+        # Let's preserve the entry so it shows up, but with 0 target seasons, or skip if valid_all_seasons is empty.
+        if not valid_all_seasons:
+            continue
 
         anime_list.append({
             "name":            show_name,
             "tvdb_id":         tvdb_id,
             "tmdb_id":         tmdb_tv_id,
             "poster":          poster_url,
-            "seasons_count":   len(all_seasons),
+            "seasons_count":   len(unique_seasons) if unique_seasons else 1,
+            "seasons_have_count": len(unique_have),
+            "seasons_missing_count": len(unique_missing),
             "seasons_have":    [e.as_dict() if hasattr(e, "as_dict") else e
-                                for e in seasons_have],
+                                for e in valid_seasons_have],
             "missing_seasons": [e.as_dict() if hasattr(e, "as_dict") else e
-                                for e in missing_seasons],
+                                for e in valid_missing_seasons],
         })
 
     # Sort: most missing seasons first, then by show name
-    anime_list.sort(key=lambda x: (-len(x["missing_seasons"]), x["name"].lower()))
+    anime_list.sort(key=lambda x: (-x["seasons_missing_count"], x["name"].lower()))
 
     log.info(f"Anime season analysis: {len(anime_list)} shows, "
-             f"{missing_seasons_total} missing seasons total")
+             f"{missing_seasons_total} missing releases total")
 
     return anime_list, {
         "shows_tracked":         len(anime_list),
         "missing_seasons_total": missing_seasons_total,
     }
 
+def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set) -> tuple[list, list]:
+    """
+    Group library anime entries by HAMA Moviesets (franchises),
+    calculate progress, and resolve missing entries.
+    """
+    if not anidb_items:
+        return [], []
+
+    from app.anidb_mapping import get_mapper
+    mapper = get_mapper()
+
+    if not mapper.ready:
+        return [], []
+
+    # Map AniDB ID -> Full dict entry representing the library item
+    library_anidb_ids = {int(item["anidb_id"]) for item in anidb_items if item.get("anidb_id")}
+
+    collections: dict[str, set[int]] = {}
+    
+    # Only group into collections based on what they have
+    for item in anidb_items:
+        aid = item.get("anidb_id")
+        if not aid:
+            continue
+        cname = mapper.collection_for_anidb(int(aid))
+        if cname and cname not in ignore_franchises:
+            if cname not in collections:
+                collections[cname] = set()
+            collections[cname].add(int(aid))
+
+    franchises = []
+    franchise_completion = []
+
+    for cname in collections.keys():
+        col_items = mapper.collection_items(cname)
+        total = len(col_items)
+        if total < 2:
+            continue
+
+        have = sum(1 for aid in col_items if aid in library_anidb_ids)
+        missing = []
+
+        for aid in col_items:
+            if aid in library_anidb_ids:
+                continue
+            
+            # Found missing item. Get metadata
+            entry = mapper.lookup(aid)
+            if not entry:
+                continue
+                
+            poster_url = None
+            title = entry.title or f"AniDB:{aid}"
+            year = None
+
+            # Try to enrich with TMDB
+            tmdb_id = entry.tmdb_id
+            if not tmdb_id and entry.tvdb_id:
+                # Try fallback TVDB to TMDB
+                find_data = tmdb.find_by_tvdb(entry.tvdb_id)
+                tv_results = (find_data.get("tv_results") or []) if find_data else []
+                if tv_results:
+                    tmdb_id = tv_results[0].get("id")
+                    
+            if tmdb_id:
+                # Could be TV or Movie. We don't strictly know, let's try TMDB caching logic or fast lookups.
+                # Actually, many missing parts are movies. 
+                md = tmdb.movie(tmdb_id)
+                if not md or md.get("status_code"):
+                    md = tmdb.tv_show(tmdb_id)
+                
+                if md and not md.get("status_code"):
+                    title = md.get("title") or md.get("name") or title
+                    poster_url = tmdb.poster_url(md.get("poster_path"))
+                    r_date = md.get("release_date") or md.get("first_air_date") or ""
+                    if r_date:
+                        year = r_date[:4]
+
+            missing.append({
+                "title": title,
+                "anidb": aid,
+                "tmdb": tmdb_id,
+                "year": year,
+                "poster": poster_url,
+            })
+
+        franchises.append({
+            "name": cname,
+            "have": have,
+            "total": total,
+            "missing": sorted(missing, key=lambda x: (x.get("year") or "9999", x.get("title") or ""))
+        })
+        franchise_completion.append({"name": cname, "have": have, "total": total})
+
+    # Sort franchises by amount missing, then alphabetically
+    franchises.sort(key=lambda x: (-len(x["missing"]), x["name"].lower()))
+    franchise_completion.sort(key=lambda x: (- (x["total"] - x["have"]), x["name"].lower()))
+
+    log.info(f"Anime franchise analysis: {len(franchises)} franchises")
+    return franchises, franchise_completion
 
 def build():
     """
@@ -772,6 +908,9 @@ def build():
     _set_step(7, f"{len(anidb_items)} anime entries")
     anime_list, anime_stats = _analyze_anime_seasons(anidb_items, tmdb)
 
+    # ---- ANIME FRANCHISES -------------------------------------
+    anime_franchises, anime_franchise_completion = _analyze_anime_collections(anidb_items, tmdb, ignore_franchises)
+
     # ---- SCORES -----------------------------------------------
     _set_step(8)
     actor_counts = Counter({k: len(v) for k, v in actors_map.items()})
@@ -789,6 +928,7 @@ def build():
         "scores": scores,
         "charts": {
             "franchise_completion": franchise_completion[:30],
+            "anime_franchise_completion": anime_franchise_completion[:30],
             "top_actors":           top_actors,
         },
         # Expose ignored lists so the dashboard can filter charts without a second call
@@ -800,6 +940,7 @@ def build():
         "tmdb_not_found": tmdb_not_found,
         "duplicates":     duplicates,
         "franchises":     franchises,
+        "anime_franchises": anime_franchises,
         "directors":      directors,
         "actors":         actors,
         "classics":       classics,

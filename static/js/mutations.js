@@ -188,7 +188,7 @@ function _purgeFromData(tmdb) {
       DATA[key] = DATA[key].filter(m => m.tmdb !== tmdb)
   })
   // Grouped arrays — remove from each group's .missing list
-  ;["franchises","directors","actors"].forEach(key => {
+  ;["franchises","anime_franchises","directors","actors"].forEach(key => {
     ;(DATA[key] || []).forEach(group => {
       if (Array.isArray(group.missing))
         group.missing = group.missing.filter(m => m.tmdb !== tmdb)
@@ -354,6 +354,7 @@ async function ignoreFranchise(name, btn){
   if (!DATA._ignored_franchises) DATA._ignored_franchises=[]
   if (!DATA._ignored_franchises.includes(name)) DATA._ignored_franchises.push(name)
   DATA.franchises = (DATA.franchises||[]).filter(f => f.name !== name)
+  DATA.anime_franchises = (DATA.anime_franchises||[]).filter(f => f.name !== name)
   btn.closest(".mb-group").remove()
   updateFilterBar()
   toast(`"${name}" ignored`,"info")
