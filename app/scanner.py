@@ -626,11 +626,15 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
 
         valid_seasons_have = []
         unique_have = set()
+        seen_have = set()
         for e in seasons_have:
-            s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
-            if str(s_val) != "0":
+            s_val = str(e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0"))
+            if s_val != "0":
                 unique_have.add(s_val)
-            valid_seasons_have.append(e)
+                # Deduplicate for the array output
+                if s_val not in seen_have:
+                    seen_have.add(s_val)
+                    valid_seasons_have.append(e)
                 
         valid_missing_seasons = []
         unique_missing = set()
@@ -638,7 +642,7 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
             s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
             if str(s_val) != "0":
                 unique_missing.add(s_val)
-            valid_missing_seasons.append(e)
+                valid_missing_seasons.append(e)
 
         # Some seasons might be partially had and partially missing, but
         # we generally want to display the number of fully had/missing seasons or parts here.
@@ -653,9 +657,16 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
             continue
 
         valid_missing_seasons_mapped = []
+        seen_missing_seasons = set()
+
         for e in valid_missing_seasons:
             e_dict = e.as_dict() if hasattr(e, "as_dict") else e
             season_num = str(e_dict.get("default_season", "0"))
+            
+            # Grouping: we only want to show ONE card per season and exclude specials (already excluded above).
+            if season_num in seen_missing_seasons:
+                continue
+            seen_missing_seasons.add(season_num)
             
             # Fetch priority poster
             season_poster = poster_url
@@ -666,6 +677,8 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
                     log.warning(f"Error fetching season poster for {tvdb_id} s{season_num}: {ex}")
                     
             e_dict["poster"] = season_poster
+            # Clean up the title to represent the season rather than a specific AniDB fragment
+            e_dict["title"] = f"Season {season_num}"
             valid_missing_seasons_mapped.append(e_dict)
 
         anime_list.append({
