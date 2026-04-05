@@ -291,6 +291,7 @@ def scan_shows(lib_cfg=None):
             tvdb_raw  = str(guids["tvdb_id"])  if guids["tvdb_id"]  else None
 
             # Resolve AniDB → tmdb & tvdb via mapper
+            entry = None
             if anidb_raw and anidb_raw.isdigit():
                 entry = mapper.lookup(int(anidb_raw))
                 if entry:
@@ -305,13 +306,29 @@ def scan_shows(lib_cfg=None):
                     anidb_not_mapped += 1
                     log.debug(f"AniDB not mapped: anidb/{anidb_raw} ({title})")
 
+            # Fallback: if no AniDB or not in mapper, but we have TVDB or TMDB,
+            # still track it for Shikimori matching and season tracking.
+            if not entry and (tvdb_raw or tmdb_id):
+                anidb_items.append({
+                    "title":    title,
+                    "anidb_id": int(anidb_raw) if (anidb_raw and anidb_raw.isdigit()) else None,
+                    "tvdb_id":  int(tvdb_raw)  if (tvdb_raw and tvdb_raw.isdigit()) else None,
+                    "tmdb_id":  tmdb_id
+                })
+
             if tmdb_id:
                 if tmdb_id not in plex_ids:
                     plex_ids[tmdb_id] = title
             else:
-                # If it's an anime that mapped to anidb/tvdb successfully, don't flag as missing
-                if not (anidb_raw and anidb_raw.isdigit() and entry):
-                    no_tmdb_guid.append({"title": title, "year": year, "source": "anidb" if anidb_raw else "unknown"})
+                # If it's an anime that mapped/detected successfully, don't flag as missing GUID
+                is_detected = (anidb_raw and anidb_raw.isdigit()) or (tvdb_raw and tvdb_raw.isdigit())
+                if not is_detected:
+                    no_tmdb_guid.append({
+                        "title": title, 
+                        "year": year, 
+                        "source": "unknown"
+                    })
+
 
 
         start += len(shows)

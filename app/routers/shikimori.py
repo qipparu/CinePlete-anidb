@@ -285,11 +285,14 @@ class ShikimoriAnalyzer:
         self.tmdb = tmdb_manager
         self.library = library_snapshot
         self.mapper = get_shikimori_mapper()
-        self.owned_tmdb = set(self.library.get("plex_ids", {}).keys())
+        self.owned_tmdb  = set(self.library.get("plex_ids", {}).keys())
         self.owned_anidb = set()
+        self.owned_tvdb  = set()
         for item in self.library.get("media_server", {}).get("anidb_items", []):
             if item.get("anidb_id"):
                 self.owned_anidb.add(int(item["anidb_id"]))
+            if item.get("tvdb_id"):
+                self.owned_tvdb.add(int(item["tvdb_id"]))
 
     def analyze(self, export_items: List[Dict[str, Any]]) -> Dict[str, Any]:
         groups = {"watching": [], "planned": [], "completed": [], "on_hold": [], "dropped": []}
@@ -310,6 +313,8 @@ class ShikimoriAnalyzer:
 
             if mapping:
                 if _is_owned(mapping.anidb_id, self.owned_anidb):
+                    is_owned = True
+                elif _is_owned(mapping.tvdb_id, self.owned_tvdb):
                     is_owned = True
                 elif _is_owned(mapping.tmdb_show_id, self.owned_tmdb):
                     is_owned = True

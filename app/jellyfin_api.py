@@ -258,6 +258,7 @@ def scan_shows(lib_cfg=None):
             provider_ids = item.get("ProviderIds", {})
             tmdb_raw  = provider_ids.get("Tmdb")  or provider_ids.get("tmdb")
             anidb_raw = provider_ids.get("AniDB") or provider_ids.get("Anidb") or provider_ids.get("anidb")
+            tvdb_raw  = provider_ids.get("Tvdb")  or provider_ids.get("tvdb")
 
             tmdb_id = None
             if tmdb_raw:
@@ -266,6 +267,7 @@ def scan_shows(lib_cfg=None):
                 except (ValueError, TypeError):
                     pass
 
+            entry = None
             if anidb_raw:
                 try:
                     entry = mapper.lookup(int(anidb_raw))
@@ -280,12 +282,29 @@ def scan_shows(lib_cfg=None):
                 else:
                     anidb_not_mapped += 1
 
+            # Fallback: if no AniDB or not in mapper, but we have TVDB or TMDB,
+            # still track it for Shikimori matching and season tracking.
+            if not entry and (tvdb_raw or tmdb_id):
+                anidb_items.append({
+                    "title":    title,
+                    "anidb_id": int(anidb_raw) if anidb_raw else None,
+                    "tvdb_id":  int(tvdb_raw)  if tvdb_raw else None,
+                    "tmdb_id":  tmdb_id
+                })
+
             if tmdb_id:
                 if tmdb_id not in plex_ids:
                     plex_ids[tmdb_id] = title
             else:
-                no_tmdb_guid.append({"title": title, "year": year,
-                                     "source": "anidb" if anidb_raw else "unknown"})
+                # If it's an anime that mapped/detected successfully, don't flag as missing GUID
+                is_detected = anidb_raw or tvdb_raw
+                if not is_detected:
+                    no_tmdb_guid.append({
+                        "title": title, 
+                        "year": year, 
+                        "source": "unknown"
+                    })
+
 
         total = data.get("TotalRecordCount", 0)
         start += len(items)

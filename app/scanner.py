@@ -1043,9 +1043,11 @@ def build():
     )
 
     # ---- RESULTS ----------------------------------------------
+    plex_stats["anidb_items"] = anidb_items
     results = {
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "media_server": plex_stats,
+
         "scores": scores,
         "charts": {
             "franchise_completion": franchise_completion[:30],
