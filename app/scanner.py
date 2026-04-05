@@ -709,7 +709,7 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict,
         "missing_seasons_total": missing_seasons_total,
     }
 
-def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set,
+def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set, wishlist_movies: set,
                                mal_completed_anidb: set = None) -> tuple[list, list]:
     """
     Group library anime entries by HAMA Moviesets (franchises),
@@ -768,6 +768,8 @@ def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set,
 
             # Try to enrich with TMDB
             tmdb_id = entry.tmdb_id
+            m_rating, m_votes, m_pop, m_genres = 0.0, 0, 0.0, []
+
             if not tmdb_id and entry.tvdb_id:
                 # Try fallback TVDB to TMDB
                 find_data = tmdb.find_by_tvdb(entry.tvdb_id)
@@ -788,6 +790,12 @@ def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set,
                     r_date = md.get("release_date") or md.get("first_air_date") or ""
                     if r_date:
                         year = r_date[:4]
+                    
+                    # Enrich with more metadata
+                    m_rating = float(md.get("vote_average", 0))
+                    m_votes  = int(md.get("vote_count", 0))
+                    m_pop    = float(md.get("popularity", 0))
+                    m_genres = [g["id"] for g in md.get("genres", [])] if md.get("genres") else md.get("genre_ids", [])
 
             missing.append({
                 "title": title,
@@ -795,6 +803,11 @@ def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set,
                 "tmdb": tmdb_id,
                 "year": year,
                 "poster": poster_url,
+                "rating": m_rating,
+                "votes": m_votes,
+                "popularity": m_pop,
+                "genre_ids": m_genres,
+                "wishlist": tmdb_id in wishlist_movies if tmdb_id else False,
             })
 
         franchises.append({
@@ -1042,7 +1055,7 @@ def build():
 
     # ---- ANIME FRANCHISES -------------------------------------
     anime_franchises, anime_franchise_completion = _analyze_anime_collections(
-        anidb_items, tmdb, ignore_franchises,
+        anidb_items, tmdb, ignore_franchises, wishlist_movies,
         mal_completed_anidb
     )
 
@@ -1078,6 +1091,14 @@ def build():
     anime_franchises.sort(key=lambda x: (-len(x.get("missing", [])), x.get("name", "").lower()))
     anime_franchise_completion.sort(key=lambda x: (x.get("have", 0) / max(1, x.get("total", 1))), reverse=True)
 
+    # MERGE ANIME INTO REGULAR FRANCHISES
+    franchises.extend(anime_franchises)
+    franchise_completion.extend(anime_franchise_completion)
+
+    # Sort everything again by amount missing
+    franchises.sort(key=lambda x: (-len(x.get("missing", [])), x.get("name", "").lower()))
+    franchise_completion.sort(key=lambda x: (x.get("have", 0) / max(1, x.get("total", 1))), reverse=True)
+
     # ---- SCORES -----------------------------------------------
     _set_step(8)
     actor_counts = Counter({k: len(v) for k, v in actors_map.items()})
@@ -1097,7 +1118,6 @@ def build():
         "scores": scores,
         "charts": {
             "franchise_completion": franchise_completion[:30],
-            "anime_franchise_completion": anime_franchise_completion[:30],
             "top_actors":           top_actors,
         },
         # Expose ignored lists so the dashboard can filter charts without a second call
@@ -1109,7 +1129,6 @@ def build():
         "tmdb_not_found": tmdb_not_found,
         "duplicates":     duplicates,
         "franchises":     franchises,
-        "anime_franchises": anime_franchises,
         "directors":      directors,
         "actors":         actors,
         "classics":       classics,

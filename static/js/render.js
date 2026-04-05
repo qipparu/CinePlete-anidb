@@ -376,7 +376,7 @@ function renderDashboard(){
 
 /* ── Grouped list (franchises / directors / actors) ─────── */
 
-function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg, showHave = false }){
+function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg, showHave = false, subtitle = "" }){
   const c           = document.getElementById("content")
   const groupFilter = getGroupFilter()
   const sort        = getSort()
@@ -387,7 +387,7 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg,
     ? [...groups].sort((a, b) => (a[nameKey]||"").localeCompare(b[nameKey]||""))
     : groups
 
-  let html = ""
+  let html = subtitle ? `<p style="color:var(--text3);font-size:.78rem;margin-bottom:1.5rem">${subtitle}</p>` : ""
 
   orderedGroups.forEach(g => {
     const name = g[nameKey]||""
@@ -453,14 +453,8 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg,
 function renderFranchises(){
   renderGroupedList({
     groups: DATA.franchises||[], nameKey:"name", nameIcon:"🎬",
-    ignoreHandler:"ignoreFranchise", emptyMsg:"No missing franchise movies 🎉"
-  })
-}
-
-function renderAnimeFranchises(){
-  renderGroupedList({
-    groups: DATA.anime_franchises||[], nameKey:"name", nameIcon:"🌸",
-    ignoreHandler:"ignoreFranchise", emptyMsg:"No missing anime franchises 🎉"
+    ignoreHandler:"ignoreFranchise", emptyMsg:"No missing franchise movies 🎉",
+    subtitle: "Отслеживание недостающих частей в коллекциях фильмов и аниме (TMDB, AniDB & MAL)."
   })
 }
 
