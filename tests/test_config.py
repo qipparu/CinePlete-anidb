@@ -205,6 +205,32 @@ class TestMigrateLibraries:
         assert len(libs) == 1
         assert libs[0]["enabled"] is False
 
+    def test_migrates_emby_config(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["EMBY"]["EMBY_URL"]          = "http://emby:8096"
+        cfg["EMBY"]["EMBY_API_KEY"]      = "embykey"
+        cfg["EMBY"]["EMBY_LIBRARY_NAME"] = "Films"
+        cfg["SERVER"]["MEDIA_SERVER"]    = "emby"
+        result = _migrate_libraries(cfg)
+        libs = result["LIBRARIES"]
+        assert len(libs) == 1
+        lib = libs[0]
+        assert lib["type"]         == "emby"
+        assert lib["url"]          == "http://emby:8096"
+        assert lib["api_key"]      == "embykey"
+        assert lib["library_name"] == "Films"
+        assert lib["enabled"]      is True
+
+    def test_emby_disabled_when_media_server_is_plex(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["EMBY"]["EMBY_URL"]     = "http://emby:8096"
+        cfg["EMBY"]["EMBY_API_KEY"] = "embykey"
+        cfg["SERVER"]["MEDIA_SERVER"] = "plex"
+        result = _migrate_libraries(cfg)
+        libs = result["LIBRARIES"]
+        assert len(libs) == 1
+        assert libs[0]["enabled"] is False
+
 
 # ─────────────────────────────────────────────
 # New config sections present in DEFAULT_CONFIG
@@ -214,6 +240,47 @@ class TestDefaultConfigSections:
 
     def test_automation_section_exists(self):
         assert "AUTOMATION" in DEFAULT_CONFIG
+
+    def test_emby_section_exists(self):
+        assert "EMBY" in DEFAULT_CONFIG
+
+    def test_emby_section_has_required_keys(self):
+        emby = DEFAULT_CONFIG["EMBY"]
+        for key in ("EMBY_URL", "EMBY_API_KEY", "EMBY_LIBRARY_NAME", "EMBY_PAGE_SIZE"):
+            assert key in emby, f"Missing key: {key}"
+
+
+# ─────────────────────────────────────────────
+# is_configured — Emby library
+# ─────────────────────────────────────────────
+
+class TestIsConfiguredEmby:
+
+    def _cfg_emby(self, url="", api_key="", library="", tmdb_key=""):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["TMDB"]["TMDB_API_KEY"] = tmdb_key
+        cfg["LIBRARIES"] = [{
+            "id": "emby-0", "type": "emby", "enabled": True,
+            "label": "Emby", "url": url, "api_key": api_key,
+            "library_name": library, "page_size": 500, "short_movie_limit": 60,
+        }]
+        return cfg
+
+    def test_full_emby_config_returns_true(self):
+        cfg = self._cfg_emby("http://emby:8096", "apikey", "Movies", "tmdbkey")
+        assert is_configured(cfg) is True
+
+    def test_emby_missing_url_returns_false(self):
+        cfg = self._cfg_emby("", "apikey", "Movies", "tmdbkey")
+        assert is_configured(cfg) is False
+
+    def test_emby_missing_api_key_returns_false(self):
+        cfg = self._cfg_emby("http://emby:8096", "", "Movies", "tmdbkey")
+        assert is_configured(cfg) is False
+
+    def test_emby_missing_library_returns_false(self):
+        cfg = self._cfg_emby("http://emby:8096", "apikey", "", "tmdbkey")
+        assert is_configured(cfg) is False
 
     def test_automation_poll_interval_default(self):
         assert DEFAULT_CONFIG["AUTOMATION"]["LIBRARY_POLL_INTERVAL"] == 30
