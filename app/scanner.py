@@ -580,9 +580,13 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
         if not all_seasons:
             all_seasons = library_entries   # fallback: only what we know
 
-        # Split into have/missing
-        seasons_have    = [e for e in all_seasons if e.anidb_id in library_anidb_ids]
-        missing_seasons = [e for e in all_seasons if e.anidb_id not in library_anidb_ids]
+        # Split into have/missing (safely handle both MappingEntry objects and dicts)
+        def _get_aid(e):
+            return e.anidb_id if hasattr(e, "anidb_id") else e.get("anidb_id")
+
+        seasons_have    = [e for e in all_seasons if _get_aid(e) in library_anidb_ids]
+        missing_seasons = [e for e in all_seasons if _get_aid(e) not in library_anidb_ids]
+
 
         # Prefer the TMDB ID from the first library entry (more reliable than mapping)
         tmdb_tv_id = None
