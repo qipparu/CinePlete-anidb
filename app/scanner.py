@@ -599,10 +599,15 @@ def build():
     # ---- PROGRESSIVE SCAN CHECK --------------------------------
     snapshot_ids = load_snapshot()
     current_ids  = set(plex_ids.keys())
+    # Check if cached actors have the have_list field (added in v3.4); if not, force full scan
+    def _cache_has_have_list(prev):
+        actors = prev.get("actors", [])
+        return not actors or "have_list" in actors[0]
+
     if snapshot_ids and current_ids == snapshot_ids:
         log.info("Progressive scan: library unchanged — reusing cached analysis")
         prev = read_results()
-        if prev:
+        if prev and _cache_has_have_list(prev):
             # Refresh only the dynamic parts (wishlist, stats, no_tmdb_guid)
             overrides       = load_json(OVERRIDES_FILE)
             wishlist_movies = set(overrides.get("wishlist_movies", []))
