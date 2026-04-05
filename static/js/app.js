@@ -22,6 +22,7 @@ const PAGE_TITLES = {
   duplicates:  "Multi-Version",
   wishlist:    "Wishlist",
   letterboxd:  "Letterboxd",
+  shikimori:   "MAL Collection",
   ignored:     "Ignored",
   config:      "Configuration",
   logs:        "Logs",
@@ -69,6 +70,7 @@ function render(){
   if (ACTIVE_TAB==="duplicates")  return renderDuplicates()
   if (ACTIVE_TAB==="wishlist")    return renderWishlist()
   if (ACTIVE_TAB==="letterboxd")  return renderLetterboxd()
+  if (ACTIVE_TAB==="shikimori")   return renderShikimori()
   if (ACTIVE_TAB==="ignored")     return renderIgnored()
   if (ACTIVE_TAB==="config")      return renderConfig()
   if (ACTIVE_TAB==="logs")        return renderLogs()

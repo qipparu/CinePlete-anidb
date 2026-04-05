@@ -110,6 +110,12 @@ DEFAULT_CONFIG = {
         "ANIDB_ENABLED":        True,   # resolve anidb:// GUIDs → TMDB via anime-list-master.xml
         "ANIDB_CACHE_TTL_DAYS": 7,      # how often to refresh the mapping XML (days)
     },
+    "SHIKIMORI": {
+        "SHIKIMORI_ENABLED":     True,
+        "SHIKIMORI_EXPORT_URL":  "",
+        "SHIKIMORI_MAPPING_URL": "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.json",
+        "SHIKIMORI_CACHE_TTL_DAYS": 7,
+    },
     "AUTH": {
         # "None" | "Forms" | "DisabledForLocalAddresses"
         "AUTH_METHOD": "None",

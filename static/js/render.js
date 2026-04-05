@@ -1068,3 +1068,120 @@ function updateExportBtn() {
   if (btn)  btn.style.display  = EXPORT_TABS.has(ACTIVE_TAB) ? "inline-block" : "none"
   if (cbtn) cbtn.style.display = EXPORT_TABS.has(ACTIVE_TAB) ? "inline-block" : "none"
 }
+/* ── Shikimori (MAL) tab ──────────────────────────────────── */
+
+async function renderShikimori() {
+    const c = document.getElementById("content");
+    
+    // Show spinner if loading takes more than 200ms
+    const spinner = setTimeout(() => {
+        c.innerHTML = `<div style="text-align:center;padding:3rem;color:var(--text3)">
+            <div class="spinner" style="margin-bottom:1rem"></div>
+            Loading MAL Collection...
+        </div>`;
+    }, 200);
+
+    let res;
+    try {
+        res = await api("/api/shikimori/collection");
+        clearTimeout(spinner);
+    } catch(e) {
+        clearTimeout(spinner);
+        c.innerHTML = emptyStateHTML("Failed to connect to backend for Shikimori data");
+        return;
+    }
+
+    if (!res.ok) {
+        c.innerHTML = emptyStateHTML(res.error || "Integration error");
+        return;
+    }
+
+    const groups = res.collection || {};
+    const stats = res.stats || {};
+    
+    // Header with stats
+    let html = `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+                padding:1rem 1.2rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:1.5rem;flex-wrap:wrap">
+        <div>
+            <div style="font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.2rem">Total Items</div>
+            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;color:var(--text)">${stats.total}</div>
+        </div>
+        <div style="width:1px;height:30px;background:var(--border)"></div>
+        <div>
+            <div style="font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.2rem">In Library</div>
+            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;color:var(--green)">${stats.owned}</div>
+        </div>
+        <div style="width:1px;height:30px;background:var(--border)"></div>
+        <div>
+            <div style="font-size:.65rem;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.2rem">Missing</div>
+            <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1.4rem;color:var(--red)">${stats.missing}</div>
+        </div>
+        <span style="flex:1"></span>
+        <button onclick="triggerShikimoriRefresh()" 
+                style="background:var(--bg3);border:1px solid var(--border2);color:var(--text2);
+                       border-radius:7px;padding:5px 12px;font-size:.7rem;font-family:'DM Mono',monospace;cursor:pointer">
+            ↻ Refresh Mapping
+        </button>
+    </div>`;
+
+    // Filter toggle: Show All vs Show Missing Only
+    // For now we'll just render all but highlight missing
+    
+    const statusLabels = {
+        watching: "Currently Watching",
+        planned:  "Plan to Watch",
+        completed: "Completed",
+        on_hold:  "On Hold",
+        dropped:  "Dropped"
+    };
+
+    let hasAny = false;
+    for (const status of ["watching", "planned", "completed", "on_hold", "dropped"]) {
+        const list = groups[status] || [];
+        if (!list.length) continue;
+        hasAny = true;
+
+        html += `
+        <div style="margin-bottom:2.5rem">
+            <div class="group-header" style="margin-bottom:1rem">
+                <span class="group-name">${statusLabels[status]}</span>
+                <span class="group-count">${list.length} items</span>
+            </div>
+            <div class="grid-posters">
+                ${list.map(m => {
+                    const badge = !m.is_owned 
+                        ? `<span style="background:rgba(239, 68, 68, 0.15);color:#f87171;font-size:.58rem;padding:1px 5px;border-radius:3px;border:1px solid rgba(239, 68, 68, 0.3)">MISSING</span>`
+                        : `<span style="background:rgba(34, 197, 94, 0.15);color:#4ade80;font-size:.58rem;padding:1px 5px;border-radius:3px;">IN LIBRARY</span>`;
+                    
+                    // Simple mock item for posterCard since we don't have full metadata here yet
+                    const item = {
+                        title: m.title_ru || m.title,
+                        year: "",
+                        poster: m.poster,
+                        tmdb: m.tmdb_id,
+                        anidb: m.anidb_id,
+                        _mal_id: m.mal_id
+                    };
+                    return posterCard(item, badge);
+                }).join("")}
+            </div>
+        </div>`;
+    }
+
+    if (!hasAny) {
+        html += emptyStateHTML("No items found in your Shikimori list.");
+    }
+
+    c.innerHTML = html;
+}
+
+async function triggerShikimoriRefresh() {
+    try {
+        await api("/api/shikimori/refresh", { method: "POST" });
+        showToast("Mapping refresh triggered", "success");
+        renderShikimori();
+    } catch(e) {
+        showToast("Refresh failed", "error");
+    }
+}

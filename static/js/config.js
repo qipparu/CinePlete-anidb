@@ -303,6 +303,7 @@ function renderConfig(){
   const wtch  = cfg.WATCHTOWER   ||{}
   const auth  = cfg.AUTH         ||{}
   const fsolv = cfg.FLARESOLVERR ||{}
+  const shk   = cfg.SHIKIMORI    ||{}
 
   const field = (id, label, value, type="text") => {
     const isSecret  = type === "secret"
@@ -516,6 +517,15 @@ function renderConfig(){
         ${hint("e.g. http://flaresolverr:8191 — used to bypass Cloudflare when fetching Letterboxd lists.")}
       </div>
 
+      <div class="form-section">
+        ${sec('Shikimori / MAL <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${check("cfg_shk_enabled", "Enabled", shk.SHIKIMORI_ENABLED)}
+        ${field("cfg_shk_url", "Export URL", shk.SHIKIMORI_EXPORT_URL||"")}
+        ${hint("URL or local path to your Shikimori JSON export. E.g. <code style='color:var(--gold)'>https://shikimori.one/yourname/list_export/animes.json</code>")}
+        ${field("cfg_shk_mapping", "Mapping JSON URL", shk.SHIKIMORI_MAPPING_URL||"")}
+        ${hint("Default: v2 mappings from PlexAniBridge-Mappings.")}
+      </div>
+
       <button class="btn-primary" onclick="saveConfig()">Save Configuration</button>
       <div id="cfgStatus" style="font-size:.75rem;color:var(--text3);margin-top:.6rem;text-align:center"></div>
     </div>
@@ -629,6 +639,11 @@ async function saveConfig(){
     },
     FLARESOLVERR:{
       FLARESOLVERR_URL: v("cfg_flaresolverr_url"),
+    },
+    SHIKIMORI:{
+      SHIKIMORI_ENABLED:      vc("cfg_shk_enabled"),
+      SHIKIMORI_EXPORT_URL:   v("cfg_shk_url"),
+      SHIKIMORI_MAPPING_URL:  v("cfg_shk_mapping"),
     },
   }
 
