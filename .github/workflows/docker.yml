@@ -23,6 +23,7 @@ on:
 permissions:
   contents: write
   security-events: write
+  packages: write
 
 jobs:
   # ─────────────────────────────────────────────
@@ -269,11 +270,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Login DockerHub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # ── Main → latest + vX.Y.Z ──
       - name: Build & Push (main)
@@ -285,8 +287,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: VERSION=${{ needs.version.outputs.version }}
           tags: |
-            sdblepas/cineplete:latest
-            sdblepas/cineplete:${{ needs.version.outputs.version }}
+            ghcr.io/qipparu/cineplete-anidb:latest
+            ghcr.io/qipparu/cineplete-anidb:${{ needs.version.outputs.version }}
           cache-from: type=gha
           cache-to:   type=gha,mode=max
 
@@ -300,8 +302,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: VERSION=${{ needs.version.outputs.version }}
           tags: |
-            sdblepas/cineplete:STG
-            sdblepas/cineplete:${{ needs.version.outputs.version }}
+            ghcr.io/qipparu/cineplete-anidb:STG
+            ghcr.io/qipparu/cineplete-anidb:${{ needs.version.outputs.version }}
           cache-from: type=gha
           cache-to:   type=gha,mode=max
 
