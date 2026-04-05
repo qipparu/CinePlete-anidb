@@ -36,6 +36,11 @@ DEFAULT_CONFIG = {
         "TMDB_MIN_DELAY": 0.02,
         "TMDB_WORKERS": 6,       # concurrent workers for TMDB calls (1-10)
     },
+    "TVDB": {
+        "TVDB_API_KEY": "",
+        "POSTER_LANGUAGES": "ru,en", # Priority order for posters (comma-separated)
+        "POSTER_SOURCE_PRIORITY": "tvdb,tmdb", # Priority order for fetching posters
+    },
     "CLASSICS": {
         "CLASSICS_PAGES": 4,
         "CLASSICS_MIN_VOTES": 5000,

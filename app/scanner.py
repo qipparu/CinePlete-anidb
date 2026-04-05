@@ -488,13 +488,73 @@ def _calculate_scores(franchise_completion, directors, director_missing_total, c
         "global_cinema_score":      global_score,
     }
 
+# TMDB 2-letter to TVDB 3-letter roughly
+TVDB_LANG_MAP = {
+    "ru": "rus", "en": "eng", "ja": "jpn", "fr": "fra",
+    "de": "deu", "it": "ita", "es": "spa", "zh": "zho"
+}
 
-def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
+def _get_best_season_poster(tmdb_tv_id: int, tvdb_id: int, season_num: str, tmdb, tvdb, cfg: dict, fallback_poster: str) -> str:
+    lang_priority = [l.strip() for l in cfg.get("TVDB", {}).get("POSTER_LANGUAGES", "ru,en").split(",") if l.strip()]
+    if not lang_priority:
+        lang_priority = ["ru", "en"]
+        
+    source_priority = [s.strip().lower() for s in cfg.get("TVDB", {}).get("POSTER_SOURCE_PRIORITY", "tvdb,tmdb").split(",") if s.strip()]
+    if not source_priority:
+        source_priority = ["tvdb", "tmdb"]
+        
+    tvdb_artworks = None
+    tmdb_season_images = None
+    
+    for lang in lang_priority:
+        tmdb_lang = lang
+        tvdb_lang = TVDB_LANG_MAP.get(lang, lang)
+        
+        for source in source_priority:
+            if source == "tvdb" and tvdb_id and tvdb:
+                if tvdb_artworks is None:
+                    try:
+                        ext = tvdb.series_extended(tvdb_id)
+                        seasons = ext.get("seasons", [])
+                        valid_season_ids = {s.get("id") for s in seasons if str(s.get("number")) == season_num}
+                        arts = ext.get("artworks", [])
+                        tvdb_artworks = [a for a in arts if a.get("type") == 3 and a.get("seasonId") in valid_season_ids]
+                    except Exception:
+                        tvdb_artworks = []
+                        
+                valid_arts = [a for a in tvdb_artworks if str(a.get("language")).lower() == tvdb_lang]
+                if valid_arts:
+                    valid_arts.sort(key=lambda x: x.get("score", 0), reverse=True)
+                    best = valid_arts[0].get("image")
+                    if best:
+                        return f"https://artworks.thetvdb.com/banners/{best}" if not best.startswith("http") else best
+                        
+            elif source == "tmdb" and tmdb_tv_id and tmdb:
+                if tmdb_season_images is None:
+                    try:
+                        resp = tmdb.tv_season_images(tmdb_tv_id, season_num)
+                        tmdb_season_images = resp.get("posters", [])
+                    except Exception:
+                        tmdb_season_images = []
+                        
+                valid_arts = [a for a in tmdb_season_images if str(a.get("iso_639_1")).lower() == tmdb_lang]
+                if valid_arts:
+                    valid_arts.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
+                    best = valid_arts[0].get("file_path")
+                    if best:
+                        pos = tmdb.poster_url(best)
+                        if pos:
+                            return pos
+
+    return fallback_poster
+
+def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[list, dict]:
     """
     Group library anime entries by TVDB ID, then compare which seasons the user
     has vs. all seasons known in the anime-list-master.xml mapping.
 
     Returns (anime_list, anime_stats) where anime_list is sorted by
+    most missing seasons first.
     most missing seasons first.
     """
     if not anidb_items:
@@ -562,7 +622,7 @@ def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
             s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
             if str(s_val) != "0":
                 unique_seasons.add(s_val)
-                valid_all_seasons.append(e)
+            valid_all_seasons.append(e)
 
         valid_seasons_have = []
         unique_have = set()
@@ -570,7 +630,7 @@ def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
             s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
             if str(s_val) != "0":
                 unique_have.add(s_val)
-                valid_seasons_have.append(e)
+            valid_seasons_have.append(e)
                 
         valid_missing_seasons = []
         unique_missing = set()
@@ -578,7 +638,7 @@ def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
             s_val = e.default_season if hasattr(e, "default_season") else (e.get("default_season", "0") if isinstance(e, dict) else "0")
             if str(s_val) != "0":
                 unique_missing.add(s_val)
-                valid_missing_seasons.append(e)
+            valid_missing_seasons.append(e)
 
         # Some seasons might be partially had and partially missing, but
         # we generally want to display the number of fully had/missing seasons or parts here.
@@ -592,6 +652,22 @@ def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
         if not valid_all_seasons:
             continue
 
+        valid_missing_seasons_mapped = []
+        for e in valid_missing_seasons:
+            e_dict = e.as_dict() if hasattr(e, "as_dict") else e
+            season_num = str(e_dict.get("default_season", "0"))
+            
+            # Fetch priority poster
+            season_poster = poster_url
+            if tvdb_id and tmdb_tv_id:
+                try:
+                    season_poster = _get_best_season_poster(tmdb_tv_id, tvdb_id, season_num, tmdb, tvdb, cfg, poster_url)
+                except Exception as ex:
+                    log.warning(f"Error fetching season poster for {tvdb_id} s{season_num}: {ex}")
+                    
+            e_dict["poster"] = season_poster
+            valid_missing_seasons_mapped.append(e_dict)
+
         anime_list.append({
             "name":            show_name,
             "tvdb_id":         tvdb_id,
@@ -600,10 +676,8 @@ def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
             "seasons_count":   len(unique_seasons) if unique_seasons else 1,
             "seasons_have_count": len(unique_have),
             "seasons_missing_count": len(unique_missing),
-            "seasons_have":    [e.as_dict() if hasattr(e, "as_dict") else e
-                                for e in valid_seasons_have],
-            "missing_seasons": [e.as_dict() if hasattr(e, "as_dict") else e
-                                for e in valid_missing_seasons],
+            "seasons_have":    [e.as_dict() if hasattr(e, "as_dict") else e for e in valid_seasons_have],
+            "missing_seasons": valid_missing_seasons_mapped,
         })
 
     # Sort: most missing seasons first, then by show name
@@ -905,11 +979,52 @@ def build():
     wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb)
 
     # ---- ANIME SEASONS ----------------------------------------
+    tvdb_api_key = cfg.get("TVDB", {}).get("TVDB_API_KEY")
+    tvdb = None
+    if tvdb_api_key:
+        try:
+            from app.tvdb import TVDB
+            tvdb = TVDB(tvdb_api_key)
+        except Exception as e:
+            log.warning(f"Failed to initialize TVDB client: {e}")
+
     _set_step(7, f"{len(anidb_items)} anime entries")
-    anime_list, anime_stats = _analyze_anime_seasons(anidb_items, tmdb)
+    anime_list, anime_stats = _analyze_anime_seasons(anidb_items, tmdb, tvdb, cfg)
 
     # ---- ANIME FRANCHISES -------------------------------------
     anime_franchises, anime_franchise_completion = _analyze_anime_collections(anidb_items, tmdb, ignore_franchises)
+
+    # Merge TV Series into Anime Franchises
+    for a in anime_list:
+        if a["seasons_missing_count"] > 0 and a["name"] not in ignore_franchises:
+            # Format missing seasons similarly to missing movies
+            # Movie uses: {"title", "tmdb", "year", "poster", "overview"}
+            formatted_missing = []
+            for m in a["missing_seasons"]:
+                formatted_missing.append({
+                    "title": m.get("title") or f"Season {m.get('default_season', '?')}",
+                    "tmdb": m.get("tmdb_id") or a["tmdb_id"],
+                    "year": None,
+                    "poster": m.get("poster") or a["poster"],
+                    "overview": "",
+                })
+            
+            anime_franchises.append({
+                "name": a["name"],
+                "tmdb_collection": None,
+                "have": a["seasons_have_count"],
+                "total": a["seasons_count"],
+                "missing": formatted_missing
+            })
+            anime_franchise_completion.append({
+                "name": a["name"],
+                "have": a["seasons_have_count"],
+                "total": a["seasons_count"]
+            })
+
+    # Resort anime franchises by most missing items first
+    anime_franchises.sort(key=lambda x: (-len(x.get("missing", [])), x.get("name", "").lower()))
+    anime_franchise_completion.sort(key=lambda x: (x.get("have", 0) / max(1, x.get("total", 1))), reverse=True)
 
     # ---- SCORES -----------------------------------------------
     _set_step(8)

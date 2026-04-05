@@ -290,6 +290,7 @@ function renderConfig(){
   const c     = document.getElementById("content")
   const cfg   = CONFIG||{}
   const tmdb  = cfg.TMDB        ||{}
+  const tvdb  = cfg.TVDB        ||{}
   const radarr= cfg.RADARR      ||{}
   const r4k   = cfg.RADARR_4K   ||{}
   const cls   = cfg.CLASSICS    ||{}
@@ -403,6 +404,10 @@ function renderConfig(){
           ${sub("Actors")}
           ${field("cfg_actor_votes", "Min votes per film",    act.ACTOR_MIN_VOTES            ??500, "number")}
           ${field("cfg_actor_max",   "Max results per actor", act.ACTOR_MAX_RESULTS_PER_ACTOR??10,  "number")}
+          ${sub("TVDB API")}
+          ${field("cfg_tvdb_key",        "TVDB API Key (v4)", tvdb?.TVDB_API_KEY||"", "secret")}
+          ${field("cfg_tvdb_lang",       "Poster Languages Priority", tvdb?.POSTER_LANGUAGES||"ru,en")}
+          ${field("cfg_tvdb_priority",   "Poster Source Priority", tvdb?.POSTER_SOURCE_PRIORITY||"tvdb,tmdb")}
           ${sub("TMDB")}
           ${field("cfg_tmdb_workers","Concurrent workers (1–10)", tmdb.TMDB_WORKERS??6,"number")}
           ${hint("Higher = faster first scan. Default 6, max 10.")}
@@ -556,6 +561,11 @@ async function saveConfig(){
     TMDB:{
       TMDB_API_KEY: v("cfg_tmdb_key"),
       TMDB_WORKERS: vi("cfg_tmdb_workers"),
+    },
+    TVDB:{
+      TVDB_API_KEY: v("cfg_tvdb_key"),
+      POSTER_LANGUAGES: v("cfg_tvdb_lang"),
+      POSTER_SOURCE_PRIORITY: v("cfg_tvdb_priority"),
     },
     CLASSICS:{
       CLASSICS_PAGES:      vi("cfg_classics_pages"),

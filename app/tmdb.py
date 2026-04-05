@@ -250,6 +250,16 @@ class TMDB:
         )
         return self.get(url)
 
+    def tv_season_images(self, tmdb_tv_id: int, season_number: int) -> dict:
+        """GET /3/tv/{tmdb_tv_id}/season/{season_number}/images
+        Returns images for a season.
+        """
+        url = (
+            f"https://api.themoviedb.org/3/tv/{tmdb_tv_id}/season/{season_number}/images"
+            f"?api_key={self.api_key}"
+        )
+        return self.get(url)
+
     # ------------------------------------------------
 
     def flush(self):
