@@ -453,8 +453,7 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg,
 function renderFranchises(){
   renderGroupedList({
     groups: DATA.franchises||[], nameKey:"name", nameIcon:"🎬",
-    ignoreHandler:"ignoreFranchise", emptyMsg:"No missing franchise movies 🎉",
-    subtitle: "Отслеживание недостающих частей в коллекциях фильмов и аниме (TMDB, AniDB & MAL)."
+    ignoreHandler:"ignoreFranchise", emptyMsg:"No missing franchise movies 🎉"
   })
 }
 
