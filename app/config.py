@@ -101,6 +101,10 @@ DEFAULT_CONFIG = {
     "FLARESOLVERR": {
         "FLARESOLVERR_URL": "",   # e.g. http://flaresolverr:8191
     },
+    "ANIDB": {
+        "ANIDB_ENABLED":        True,   # resolve anidb:// GUIDs → TMDB via anime-list-master.xml
+        "ANIDB_CACHE_TTL_DAYS": 7,      # how often to refresh the mapping XML (days)
+    },
     "AUTH": {
         # "None" | "Forms" | "DisabledForLocalAddresses"
         "AUTH_METHOD": "None",

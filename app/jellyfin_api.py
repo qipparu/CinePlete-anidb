@@ -61,11 +61,14 @@ def scan_movies(lib_cfg=None):
     """
     Scan the configured Jellyfin movie library.
 
+    Falls back to AniDB→TMDB mapping when anidb:// provider ID is present
+    but no Tmdb ID is found.
+
     Returns:
         plex_ids      dict[int, str]   — {tmdb_id: title}
         directors     dict[str, set]   — {director_name: {tmdb_id, ...}}
         actors        dict[str, set]   — {actor_name: {tmdb_id, ...}}
-        stats         dict             — scan statistics
+        stats         dict             — scan statistics (includes anidb_items=[])
         no_tmdb_guid  list[dict]       — films without a TMDB provider ID
     """
     lc = _build_lib_cfg(lib_cfg)
@@ -77,8 +80,16 @@ def scan_movies(lib_cfg=None):
     library_id = _library_id(library_name, lc)
     log.info(f"Jellyfin library '{library_name}' → ID {library_id}")
 
+    _mapper = None
+    def get_mapper():
+        nonlocal _mapper
+        if _mapper is None:
+            from app.anidb_mapping import get_mapper as _gm
+            _mapper = _gm()
+        return _mapper
+
     media_ids    = {}          # {tmdb_id: title}
-    tmdb_id_dupes = {}         # {tmdb_id: [title1, title2, ...]}
+    tmdb_id_dupes = {}
     directors    = defaultdict(set)
     actors       = defaultdict(set)
     no_tmdb_guid = []
@@ -86,6 +97,8 @@ def scan_movies(lib_cfg=None):
     start     = 0
     scanned   = 0
     skipped_short = 0
+    anidb_resolved   = 0
+    anidb_not_mapped = 0
 
     while True:
         data = _jf_get("/Items", lc, {
@@ -107,7 +120,6 @@ def scan_movies(lib_cfg=None):
             title = item.get("Name", "")
             year  = str(item.get("ProductionYear", "")) or None
 
-            # RunTimeTicks → minutes (1 tick = 100 nanoseconds)
             ticks        = int(item.get("RunTimeTicks") or 0)
             duration_min = ticks / 600_000_000
 
@@ -115,17 +127,33 @@ def scan_movies(lib_cfg=None):
                 skipped_short += 1
                 continue
 
-            # TMDB ID — stored as plain string in ProviderIds.Tmdb
             provider_ids = item.get("ProviderIds", {})
             tmdb_raw     = provider_ids.get("Tmdb") or provider_ids.get("tmdb")
+            anidb_raw    = provider_ids.get("AniDB") or provider_ids.get("Anidb") or provider_ids.get("anidb")
 
-            if not tmdb_raw:
-                no_tmdb_guid.append({"title": title, "year": year})
-                continue
+            tmdb_id = None
+            if tmdb_raw:
+                try:
+                    tmdb_id = int(tmdb_raw)
+                except (ValueError, TypeError):
+                    pass
 
-            try:
-                tmdb_id = int(tmdb_raw)
-            except (ValueError, TypeError):
+            # AniDB fallback
+            if not tmdb_id and anidb_raw:
+                try:
+                    entry = get_mapper().lookup(int(anidb_raw))
+                except (ValueError, TypeError):
+                    entry = None
+                if entry and entry.tmdb_id:
+                    tmdb_id = entry.tmdb_id
+                    anidb_resolved += 1
+                    log.debug(f"AniDB→TMDB: anidb/{anidb_raw} → tmdb/{tmdb_id} ({title})")
+                elif anidb_raw:
+                    anidb_not_mapped += 1
+                    no_tmdb_guid.append({"title": title, "year": year, "source": "anidb"})
+                    continue
+
+            if not tmdb_id:
                 no_tmdb_guid.append({"title": title, "year": year})
                 continue
 
@@ -136,9 +164,6 @@ def scan_movies(lib_cfg=None):
             else:
                 media_ids[tmdb_id] = title
 
-            # People — directors and actors are in the same array
-            # Limit actors to top 5 per film — Jellyfin returns ALL cast
-            # including minor roles, so we cap to keep recommendations focused
             actor_count = 0
             for person in item.get("People", []):
                 name      = person.get("Name", "").strip()
@@ -156,9 +181,12 @@ def scan_movies(lib_cfg=None):
         if start >= total:
             break
 
-    # Only keep directors/actors appearing in 2+ films
     directors = {k: v for k, v in directors.items() if len(v) > 1}
     actors    = {k: v for k, v in actors.items()    if len(v) > 1}
+
+    if anidb_resolved:
+        log.info(f"AniDB→TMDB resolved: {anidb_resolved} movies, "
+                 f"not mapped: {anidb_not_mapped}")
 
     stats = {
         "scanned_items":  scanned,
@@ -167,6 +195,9 @@ def scan_movies(lib_cfg=None):
         "directors_kept": len(directors),
         "actors_kept":    len(actors),
         "no_tmdb_guid":   len(no_tmdb_guid),
+        "anidb_resolved": anidb_resolved,
+        "anidb_not_mapped": anidb_not_mapped,
+        "anidb_items":    [],   # empty for movie libraries
         "duplicates": [
             {"tmdb": tmdb_id, "titles": titles}
             for tmdb_id, titles in tmdb_id_dupes.items()
@@ -174,3 +205,109 @@ def scan_movies(lib_cfg=None):
     }
 
     return media_ids, directors, actors, stats, no_tmdb_guid
+
+
+def scan_shows(lib_cfg=None):
+    """
+    Scan a Jellyfin TV show library — intended for HAMA-tagged anime libraries.
+
+    Collects show-level provider IDs (AniDB, Tvdb, Tmdb) and resolves them
+    via the AniDB mapper. stats["anidb_items"] contains full mapping dicts
+    for every AniDB-tagged show, consumed by scanner._analyze_anime_seasons().
+
+    Returns: (plex_ids, directors={}, actors={}, stats, no_tmdb_guid)
+    """
+    lc = _build_lib_cfg(lib_cfg)
+
+    page_size    = int(lc.get("page_size", 500))
+    library_name = lc.get("library_name", "Anime")
+
+    library_id = _library_id(library_name, lc)
+    log.info(f"Jellyfin anime library '{library_name}' → ID {library_id}")
+
+    from app.anidb_mapping import get_mapper
+    mapper = get_mapper()
+
+    plex_ids:    dict[int, str] = {}
+    no_tmdb_guid: list[dict]    = []
+    anidb_items: list[dict]     = []
+    start     = 0
+    scanned   = 0
+    anidb_resolved   = 0
+    anidb_not_mapped = 0
+
+    while True:
+        data = _jf_get("/Items", lc, {
+            "ParentId":        library_id,
+            "IncludeItemTypes":"Series",
+            "Recursive":       "true",
+            "Fields":          "ProviderIds",
+            "StartIndex":      start,
+            "Limit":           page_size,
+        })
+
+        items = data.get("Items", [])
+        if not items:
+            break
+
+        for item in items:
+            scanned += 1
+            title = item.get("Name", "")
+            year  = str(item.get("ProductionYear", "")) or None
+
+            provider_ids = item.get("ProviderIds", {})
+            tmdb_raw  = provider_ids.get("Tmdb")  or provider_ids.get("tmdb")
+            anidb_raw = provider_ids.get("AniDB") or provider_ids.get("Anidb") or provider_ids.get("anidb")
+
+            tmdb_id = None
+            if tmdb_raw:
+                try:
+                    tmdb_id = int(tmdb_raw)
+                except (ValueError, TypeError):
+                    pass
+
+            if anidb_raw:
+                try:
+                    entry = mapper.lookup(int(anidb_raw))
+                except (ValueError, TypeError):
+                    entry = None
+
+                if entry:
+                    if not tmdb_id and entry.tmdb_id:
+                        tmdb_id = entry.tmdb_id
+                        anidb_resolved += 1
+                    anidb_items.append(entry.as_dict())
+                else:
+                    anidb_not_mapped += 1
+
+            if tmdb_id:
+                if tmdb_id not in plex_ids:
+                    plex_ids[tmdb_id] = title
+            else:
+                no_tmdb_guid.append({"title": title, "year": year,
+                                     "source": "anidb" if anidb_raw else "unknown"})
+
+        total = data.get("TotalRecordCount", 0)
+        start += len(items)
+        if start >= total:
+            break
+
+    log.info(f"Anime show scan (Jellyfin): {scanned} shows, "
+             f"{len(anidb_items)} in AniDB mapper, "
+             f"{anidb_resolved} resolved, {anidb_not_mapped} not mapped")
+
+    stats = {
+        "scanned_items":  scanned,
+        "indexed_tmdb":   len(plex_ids),
+        "skipped_short":  0,
+        "directors_kept": 0,
+        "actors_kept":    0,
+        "no_tmdb_guid":   len(no_tmdb_guid),
+        "anidb_resolved": anidb_resolved,
+        "anidb_not_mapped": anidb_not_mapped,
+        "anidb_items":    anidb_items,
+        "duplicates":     [],
+    }
+    return plex_ids, {}, {}, stats, no_tmdb_guid
+
+

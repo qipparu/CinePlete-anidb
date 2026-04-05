@@ -537,6 +537,168 @@ async function renderWishlist(){
   }).join("")}</div>${btn}`
 }
 
+/* ── Anime Seasons ───────────────────────────────────────── */
+
+// Two view modes: "grid" (poster cards) or "list" (detailed row)
+let _animeViewMode = "grid"
+
+function renderAnime(){
+  const c    = document.getElementById("content")
+  const list = DATA.anime || []
+  const stats = DATA.anime_stats || {}
+
+  if (!list.length){
+    c.innerHTML = emptyStateHTML(
+      "No anime season data — add a TV show library with content_type: shows"
+    )
+    return
+  }
+
+  // Filter controls
+  const search      = (document.getElementById("search")?.value || "").toLowerCase()
+  const sortVal     = document.getElementById("sort")?.value || "missing"
+
+  let filtered = list
+  if (search) filtered = filtered.filter(s => s.name.toLowerCase().includes(search))
+
+  // Sort options
+  if (sortVal === "title")    filtered = [...filtered].sort((a,b) => a.name.localeCompare(b.name))
+  else if (sortVal === "missing") filtered = [...filtered].sort((a,b) => b.missing_seasons.length - a.missing_seasons.length)
+  else if (sortVal === "total") filtered = [...filtered].sort((a,b) => b.seasons_count - a.seasons_count)
+
+  const { slice, btn } = _paginate(filtered, "anime")
+
+  const modeBtn = (mode, label, icon) =>
+    `<button onclick="_animeSetMode('${mode}')"
+      style="padding:3px 10px;border-radius:6px;border:1px solid var(--border2);
+             background:${_animeViewMode===mode?"var(--bg3)":"var(--bg)"};
+             color:${_animeViewMode===mode?"var(--text)":"var(--text3)"};
+             cursor:pointer;font-size:.72rem;font-family:'DM Mono',monospace">${icon} ${label}</button>`
+
+  const statsLine = stats.shows_tracked
+    ? `<span style="color:var(--text3);font-size:.75rem">${stats.shows_tracked} shows tracked · ${stats.missing_seasons_total} seasons missing</span>`
+    : ""
+
+  const controls = `
+    <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:1.25rem;flex-wrap:wrap">
+      ${statsLine}
+      <span style="flex:1"></span>
+      ${modeBtn("grid","Grid","⊞")}
+      ${modeBtn("list","Detail","≡")}
+    </div>`
+
+  const cards = _animeViewMode === "list"
+    ? slice.map(_animeListCard).join("")
+    : `<div class="grid-posters">${slice.map(_animeGridCard).join("")}</div>`
+
+  // Update badge
+  const badge = document.getElementById("badge-anime")
+  if (badge){
+    const n = stats.missing_seasons_total || 0
+    badge.textContent = n > 99 ? "99+" : n
+    badge.style.display = n ? "" : "none"
+  }
+
+  c.innerHTML = controls + cards + btn
+}
+
+function _animeSetMode(mode){
+  _animeViewMode = mode
+  renderAnime()
+}
+
+function _animeGridCard(show){
+  const missing = show.missing_seasons || []
+  const have    = show.seasons_have    || []
+  const total   = show.seasons_count   || (have.length + missing.length)
+  const pct     = total ? Math.round((have.length / total) * 100) : 100
+
+  const imgHtml = show.poster
+    ? `<img class="pc-img" src="${show.poster}" loading="lazy" alt=""/>`
+    : `<div class="pc-no-img"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".3"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg><span>No Image</span></div>`
+
+  const color = pct === 100 ? "var(--green)"
+              : pct >= 50   ? "var(--amber)"
+              : "var(--red)"
+
+  return `
+    <div class="pc" id="anime-${show.tvdb_id || show.name}" title="${escHtml(show.name)}">
+      ${imgHtml}
+      <div class="pc-info">
+        <div class="pc-title" title="${escHtml(show.name)}">${escHtml(show.name)}</div>
+        <div class="pc-meta">
+          <span style="color:${color};font-weight:500">${have.length}/${total}</span>
+          <span>seasons</span>
+        </div>
+        <div style="height:3px;background:var(--border);border-radius:3px;margin-top:.4rem;overflow:hidden">
+          <div style="height:3px;background:${color};width:${pct}%;border-radius:3px;transition:width 1s ease"></div>
+        </div>
+      </div>
+      <div class="pc-overlay">
+        <div class="pc-overlay-title">${escHtml(show.name)}</div>
+        <div class="pc-overlay-actions">
+          ${missing.length
+            ? `<span style="color:var(--red);font-size:.62rem">✗ ${missing.length} missing</span>`
+            : `<span style="color:var(--green);font-size:.62rem">✓ Complete!</span>`}
+          ${show.tvdb_id ? `<a href="https://thetvdb.com/?id=${show.tvdb_id}&tab=series" target="_blank" rel="noopener"
+              style="color:var(--gold);font-size:.6rem;text-decoration:none">TVDB ↗</a>` : ""}
+        </div>
+      </div>
+    </div>`
+}
+
+function _animeListCard(show){
+  const missing = show.missing_seasons || []
+  const have    = show.seasons_have    || []
+  const total   = show.seasons_count   || (have.length + missing.length)
+  const pct     = total ? Math.round((have.length / total) * 100) : 100
+
+  const color = pct === 100 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)"
+
+  const posterHtml = show.poster
+    ? `<img src="${show.poster}" loading="lazy" alt=""
+          style="width:60px;height:90px;object-fit:cover;border-radius:6px;flex-shrink:0"/>`
+    : `<div style="width:60px;height:90px;border-radius:6px;background:var(--bg3);
+                   display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text3);font-size:.55rem">No img</div>`
+
+  const seasonRow = (e, owned) => {
+    const s = e.default_season || "?"
+    const lbl = e.title ? escHtml(e.title) : `Season ${s}`
+    const icon = owned ? `<span style="color:var(--green)">✓</span>` : `<span style="color:var(--red)">✗</span>`
+    return `<div style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;padding:2px 0">
+      ${icon}
+      <span style="color:var(--text3);min-width:22px">S${s}</span>
+      <span style="color:var(--text2)">${lbl}</span>
+      <span style="color:var(--text3);margin-left:auto;font-size:.65rem">anidb:${e.anidb_id}</span>
+    </div>`
+  }
+
+  const allSeasons = [
+    ...have.map(e => seasonRow(e, true)),
+    ...missing.map(e => seasonRow(e, false)),
+  ].join("")
+
+  return `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+                padding:.9rem 1rem;margin-bottom:.65rem;display:flex;gap:1rem;align-items:flex-start">
+      ${posterHtml}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.4rem;flex-wrap:wrap">
+          <span style="font-family:'Syne',sans-serif;font-weight:700;font-size:.95rem;color:var(--text)">${escHtml(show.name)}</span>
+          <span style="color:${color};font-size:.72rem;font-weight:500">${have.length}/${total} seasons</span>
+          ${show.tvdb_id ? `<a href="https://thetvdb.com/?id=${show.tvdb_id}&tab=series" target="_blank" rel="noopener"
+              style="margin-left:auto;color:var(--text3);font-size:.65rem;text-decoration:none;flex-shrink:0">TVDB:${show.tvdb_id} ↗</a>` : ""}
+          ${show.tmdb_id ? `<a href="https://www.themoviedb.org/tv/${show.tmdb_id}" target="_blank" rel="noopener"
+              style="color:var(--text3);font-size:.65rem;text-decoration:none;flex-shrink:0">TMDB ↗</a>` : ""}
+        </div>
+        <div style="height:3px;background:var(--border);border-radius:3px;margin-bottom:.65rem;overflow:hidden">
+          <div style="height:3px;background:${color};width:${pct}%;border-radius:3px;transition:width 1s ease"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:0">${allSeasons}</div>
+      </div>
+    </div>`
+}
+
 /* ── Letterboxd tab ──────────────────────────────────────── */
 
 let _lbPollTimer   = null   // setInterval handle while refresh is in flight

@@ -226,6 +226,31 @@ class TMDB:
         return f"https://image.tmdb.org/t/p/w500{path}"
 
     # ------------------------------------------------
+    # TV SHOWS  (for anime season tracking)
+    # ------------------------------------------------
+
+    def find_by_tvdb(self, tvdb_id: int) -> dict:
+        """GET /3/find/{tvdb_id}?external_source=tvdb_id
+        Returns {"tv_results": [...], "movie_results": [...]}.
+        Used to resolve a TVDB series ID → TMDB TV show entry for poster/name.
+        """
+        url = (
+            f"https://api.themoviedb.org/3/find/{tvdb_id}"
+            f"?api_key={self.api_key}&external_source=tvdb_id"
+        )
+        return self.get(url)
+
+    def tv_show(self, tmdb_tv_id: int) -> dict:
+        """GET /3/tv/{tmdb_tv_id}
+        Returns TV show details: name, poster_path, number_of_seasons, seasons[].
+        """
+        url = (
+            f"https://api.themoviedb.org/3/tv/{tmdb_tv_id}"
+            f"?api_key={self.api_key}"
+        )
+        return self.get(url)
+
+    # ------------------------------------------------
 
     def flush(self):
         save_cache(self.cache)

@@ -13,7 +13,7 @@ const TITLE_TABS = [
 const ALL_TABS = [
   'dashboard', 'notmdb', 'nomatch', 'duplicates',
   'franchises', 'directors', 'actors', 'classics',
-  'suggestions', 'wishlist', 'config', 'logs',
+  'suggestions', 'wishlist', 'anime', 'config', 'logs',
 ]
 
 test.describe('Sidebar navigation', () => {
@@ -53,7 +53,7 @@ test.describe('Sidebar navigation', () => {
   // For data-gated tabs: verify button is clickable and becomes .active
   // (page title stays "Dashboard" via renderSkeleton when no scan data exists)
   const DATA_GATED = ['notmdb', 'nomatch', 'duplicates', 'franchises',
-                      'directors', 'actors', 'classics', 'suggestions', 'wishlist']
+                      'directors', 'actors', 'classics', 'suggestions', 'wishlist', 'anime']
   for (const tab of DATA_GATED) {
     test(`"${tab}" nav button is clickable and becomes active`, async ({ page }) => {
       await page.locator(`button.nav[data-tab="${tab}"]`).click()

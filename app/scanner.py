@@ -27,7 +27,7 @@ scan_state = {
     "running": False,
     "step": "",
     "step_index": 0,
-    "step_total": 8,
+    "step_total": 9,
     "detail": "",
     "error": None,
     "last_completed": None,
@@ -42,6 +42,7 @@ STEPS = [
     "Analyzing directors",
     "Building suggestions",
     "Analyzing actors",
+    "Analyzing anime seasons",
     "Building results",
 ]
 
@@ -488,6 +489,99 @@ def _calculate_scores(franchise_completion, directors, director_missing_total, c
     }
 
 
+def _analyze_anime_seasons(anidb_items: list, tmdb) -> tuple[list, dict]:
+    """
+    Group library anime entries by TVDB ID, then compare which seasons the user
+    has vs. all seasons known in the anime-list-master.xml mapping.
+
+    Returns (anime_list, anime_stats) where anime_list is sorted by
+    most missing seasons first.
+    """
+    if not anidb_items:
+        return [], {"shows_tracked": 0, "missing_seasons_total": 0}
+
+    from app.anidb_mapping import get_mapper
+    mapper = get_mapper()
+
+    if not mapper.ready:
+        log.warning("AniDB mapper not ready — skipping anime season analysis")
+        return [], {"shows_tracked": 0, "missing_seasons_total": 0}
+
+    # Build set of AniDB IDs present in the user's library
+    library_anidb_ids = {int(item["anidb_id"]) for item in anidb_items if item.get("anidb_id")}
+
+    # Group by TVDB ID
+    tvdb_to_library: dict[int, list[dict]] = {}
+    for item in anidb_items:
+        tvdb_id = item.get("tvdb_id")
+        if not tvdb_id:
+            continue
+        tvdb_to_library.setdefault(tvdb_id, []).append(item)
+
+    anime_list = []
+    missing_seasons_total = 0
+
+    for tvdb_id, library_entries in tvdb_to_library.items():
+        # All seasons for this TVDB show in the mapping
+        all_seasons = mapper.tvdb_seasons(tvdb_id)
+        if not all_seasons:
+            all_seasons = library_entries   # fallback: only what we know
+
+        # Split into have/missing
+        seasons_have    = [e for e in all_seasons if e.anidb_id in library_anidb_ids]
+        missing_seasons = [e for e in all_seasons if e.anidb_id not in library_anidb_ids]
+
+        # Prefer the TMDB ID from the first library entry (more reliable than mapping)
+        tmdb_tv_id = None
+        for entry in library_entries:
+            if entry.get("tmdb_id"):
+                tmdb_tv_id = entry["tmdb_id"]
+                break
+
+        # Fetch show info for poster & canonical name
+        show_name   = library_entries[0].get("title") or f"TVDB:{tvdb_id}"
+        poster_url  = None
+
+        if tmdb_tv_id:
+            tv_data = tmdb.tv_show(tmdb_tv_id)
+            if tv_data:
+                show_name  = tv_data.get("name") or show_name
+                poster_url = tmdb.poster_url(tv_data.get("poster_path"))
+        else:
+            # Try to resolve via TVDB → TMDB
+            find_data = tmdb.find_by_tvdb(tvdb_id)
+            tv_results = (find_data.get("tv_results") or []) if find_data else []
+            if tv_results:
+                tmdb_tv_id = tv_results[0].get("id")
+                show_name  = tv_results[0].get("name") or show_name
+                poster_url = tmdb.poster_url(tv_results[0].get("poster_path"))
+
+        missing_seasons_total += len(missing_seasons)
+
+        anime_list.append({
+            "name":            show_name,
+            "tvdb_id":         tvdb_id,
+            "tmdb_id":         tmdb_tv_id,
+            "poster":          poster_url,
+            "seasons_count":   len(all_seasons),
+            "seasons_have":    [e.as_dict() if hasattr(e, "as_dict") else e
+                                for e in seasons_have],
+            "missing_seasons": [e.as_dict() if hasattr(e, "as_dict") else e
+                                for e in missing_seasons],
+        })
+
+    # Sort: most missing seasons first, then by show name
+    anime_list.sort(key=lambda x: (-len(x["missing_seasons"]), x["name"].lower()))
+
+    log.info(f"Anime season analysis: {len(anime_list)} shows, "
+             f"{missing_seasons_total} missing seasons total")
+
+    return anime_list, {
+        "shows_tracked":         len(anime_list),
+        "missing_seasons_total": missing_seasons_total,
+    }
+
+
 def build():
     """
     Run a full scan synchronously.
@@ -553,14 +647,15 @@ def build():
               label=f"Scanning {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}")
 
     def _scan_one(lib):
-        lib_type = lib.get("type", "plex").lower()
-        label    = lib.get("label") or lib.get("library_name") or lib_type
-        log.info(f"Scanning {lib_type} library: {label}")
+        lib_type     = lib.get("type", "plex").lower()
+        content_type = lib.get("content_type", "movies").lower()   # "movies" | "shows"
+        label        = lib.get("label") or lib.get("library_name") or lib_type
+        log.info(f"Scanning {lib_type} library ({content_type}): {label}")
         if lib_type == "jellyfin":
-            from app.jellyfin_api import scan_movies
+            from app.jellyfin_api import scan_movies, scan_shows
         else:
-            from app.plex_xml import scan_movies
-        return scan_movies(lib)
+            from app.plex_xml import scan_movies, scan_shows
+        return scan_shows(lib) if content_type == "shows" else scan_movies(lib)
 
     all_results = []
     if len(enabled_libs) == 1:
@@ -578,9 +673,11 @@ def build():
     no_tmdb_guid  = []
     duplicates    = []
     plex_stats    = {}
+    anidb_items   = []   # all anime entries from show-type libraries
 
     for ids, dirs, acts, stats, no_guid in all_results:
         plex_ids.update(ids)
+        anidb_items.extend(stats.pop("anidb_items", []))
         for name, tmdb_ids in dirs.items():
             directors_map[name].update(tmdb_ids)
         for name, tmdb_ids in acts.items():
@@ -671,8 +768,12 @@ def build():
     # ---- WISHLIST ---------------------------------------------
     wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb)
 
+    # ---- ANIME SEASONS ----------------------------------------
+    _set_step(7, f"{len(anidb_items)} anime entries")
+    anime_list, anime_stats = _analyze_anime_seasons(anidb_items, tmdb)
+
     # ---- SCORES -----------------------------------------------
-    _set_step(7)
+    _set_step(8)
     actor_counts = Counter({k: len(v) for k, v in actors_map.items()})
     top_actors   = [{"name": n, "count": c} for n, c in actor_counts.most_common(40)]
 
@@ -704,6 +805,8 @@ def build():
         "classics":       classics,
         "suggestions":    suggestions,
         "wishlist":       wishlist,
+        "anime":          anime_list,
+        "anime_stats":    anime_stats,
     }
 
     tmdb.flush()

@@ -3,6 +3,9 @@ import defusedxml.ElementTree as ET
 from collections import defaultdict
 
 from app.config import load_config
+from app.logger import get_logger
+
+log = get_logger(__name__)
 
 
 def _build_lib_cfg(lib_cfg):
@@ -41,10 +44,27 @@ def library_key(lib_cfg=None):
 
 
 def scan_movies(lib_cfg=None):
+    """
+    Scan a Plex movie library (type=1).
+    Falls back to AniDB→TMDB mapping when anidb:// GUID is present
+    but no tmdb:// GUID is found.
+
+    Returns: (plex_ids, directors, actors, stats, no_tmdb_guid)
+    stats["anidb_items"] is an empty list here (movies don't have show-level season data).
+    """
     lc = _build_lib_cfg(lib_cfg)
     short_movie_limit = int(lc.get("short_movie_limit", 60))
     page_size = int(lc.get("page_size", 500))
     key = library_key(lc)
+
+    # Lazy-load the mapper only when we actually encounter an anidb:// GUID
+    _mapper = None
+    def get_mapper():
+        nonlocal _mapper
+        if _mapper is None:
+            from app.anidb_mapping import get_mapper as _gm
+            _mapper = _gm()
+        return _mapper
 
     plex_ids = {}
     plex_editions = {}
@@ -52,9 +72,12 @@ def scan_movies(lib_cfg=None):
     directors = defaultdict(set)
     actors = defaultdict(set)
     no_tmdb_guid = []
+    anidb_items = []   # kept as empty for movie libraries (no season tracking)
     start = 0
     scanned = 0
     skipped_short = 0
+    anidb_resolved = 0
+    anidb_not_mapped = 0
 
     while True:
         xml = plex_get(
@@ -80,18 +103,37 @@ def scan_movies(lib_cfg=None):
             if duration_min < short_movie_limit:
                 skipped_short += 1
                 continue
+
             tmdb_id = None
+            anidb_raw = None
+
             for g in v.findall("Guid"):
-                gid = g.attrib.get("id")
-                if gid and gid.startswith("tmdb://"):
+                gid = g.attrib.get("id", "")
+                if gid.startswith("tmdb://"):
                     try:
                         tmdb_id = int(gid.split("tmdb://")[1])
                     except Exception:
                         tmdb_id = None
                     break
+                elif gid.startswith("anidb://"):
+                    anidb_raw = gid.split("anidb://")[1]
+
+            # AniDB fallback for movie libraries
+            if not tmdb_id and anidb_raw and anidb_raw.isdigit():
+                entry = get_mapper().lookup(int(anidb_raw))
+                if entry and entry.tmdb_id:
+                    tmdb_id = entry.tmdb_id
+                    anidb_resolved += 1
+                    log.debug(f"AniDB→TMDB: anidb/{anidb_raw} → tmdb/{tmdb_id} ({title})")
+                else:
+                    anidb_not_mapped += 1
+                    no_tmdb_guid.append({"title": title, "year": year, "source": "anidb"})
+                    continue
+
             if not tmdb_id:
                 no_tmdb_guid.append({"title": title, "year": year})
                 continue
+
             edition = v.attrib.get("editionTitle", "")
             if tmdb_id in plex_ids:
                 if tmdb_id not in tmdb_id_dupes:
@@ -113,6 +155,10 @@ def scan_movies(lib_cfg=None):
     directors = {k: v for k, v in directors.items() if len(v) > 1}
     actors = {k: v for k, v in actors.items() if len(v) > 1}
 
+    if anidb_resolved:
+        log.info(f"AniDB→TMDB resolved: {anidb_resolved} movies, "
+                 f"not mapped: {anidb_not_mapped}")
+
     stats = {
         "scanned_items": scanned,
         "indexed_tmdb": len(plex_ids),
@@ -120,9 +166,122 @@ def scan_movies(lib_cfg=None):
         "directors_kept": len(directors),
         "actors_kept": len(actors),
         "no_tmdb_guid": len(no_tmdb_guid),
+        "anidb_resolved": anidb_resolved,
+        "anidb_not_mapped": anidb_not_mapped,
+        "anidb_items": anidb_items,   # empty for movie libraries
         "duplicates": [
             {"tmdb": tmdb_id, "titles": titles}
             for tmdb_id, titles in tmdb_id_dupes.items()
         ],
     }
     return plex_ids, directors, actors, stats, no_tmdb_guid
+
+
+def scan_shows(lib_cfg=None):
+    """
+    Scan a Plex TV show library (type=2) — intended for HAMA-tagged anime libraries.
+
+    Collects show-level GUIDs (anidb://, tvdb://, tmdb://) and resolves them via
+    the AniDB mapper. Items with a resolved TMDB ID join plex_ids so they participate
+    in the existing suggestions/director/actor pipeline where applicable.
+
+    stats["anidb_items"] contains full MappingEntry dicts for ALL anidb-tagged shows —
+    this is the data consumed by scanner._analyze_anime_seasons().
+
+    Returns: (plex_ids, directors={}, actors={}, stats, no_tmdb_guid)
+    """
+    lc = _build_lib_cfg(lib_cfg)
+    page_size = int(lc.get("page_size", 500))
+    key = library_key(lc)
+
+    from app.anidb_mapping import get_mapper
+    mapper = get_mapper()
+
+    plex_ids: dict[int, str] = {}         # {tmdb_id: title}
+    no_tmdb_guid: list[dict] = []
+    anidb_items: list[dict]  = []         # all resolvable anidb entries
+    start     = 0
+    scanned   = 0
+    anidb_resolved   = 0
+    anidb_not_mapped = 0
+
+    while True:
+        xml = plex_get(
+            f"/library/sections/{key}/all",
+            lc,
+            {
+                "type": "2",           # 2 = Show
+                "includeGuids": "1",
+                "X-Plex-Container-Start": start,
+                "X-Plex-Container-Size": page_size,
+            },
+        )
+        root = ET.fromstring(xml)
+        shows = root.findall("Directory")
+        if not shows:
+            break
+
+        for show in shows:
+            scanned += 1
+            title = show.attrib.get("title", "")
+            year  = show.attrib.get("year", "")
+
+            tmdb_id  = None
+            anidb_raw = None
+            tvdb_raw  = None
+
+            for g in show.findall("Guid"):
+                gid = g.attrib.get("id", "")
+                if gid.startswith("tmdb://"):
+                    try:
+                        tmdb_id = int(gid.split("tmdb://")[1])
+                    except Exception:
+                        pass
+                elif gid.startswith("anidb://"):
+                    anidb_raw = gid.split("anidb://")[1]
+                elif gid.startswith("tvdb://"):
+                    tvdb_raw = gid.split("tvdb://")[1]
+
+            # Resolve AniDB → tmdb & tvdb via mapper
+            if anidb_raw and anidb_raw.isdigit():
+                entry = mapper.lookup(int(anidb_raw))
+                if entry:
+                    # Prefer explicit tmdb:// GUID from Plex, fall back to mapping
+                    if not tmdb_id and entry.tmdb_id:
+                        tmdb_id = entry.tmdb_id
+                        anidb_resolved += 1
+                        log.debug(f"AniDB→TMDB: anidb/{anidb_raw} → tmdb/{tmdb_id} ({title})")
+                    # Record this show for season-tracking regardless
+                    anidb_items.append(entry.as_dict())
+                else:
+                    anidb_not_mapped += 1
+                    log.debug(f"AniDB not mapped: anidb/{anidb_raw} ({title})")
+
+            if tmdb_id:
+                if tmdb_id not in plex_ids:
+                    plex_ids[tmdb_id] = title
+            else:
+                no_tmdb_guid.append({"title": title, "year": year, "source": "anidb" if anidb_raw else "unknown"})
+
+        start += len(shows)
+
+    if anidb_resolved or anidb_not_mapped:
+        log.info(f"Anime show scan: {scanned} shows, "
+                 f"{len(anidb_items)} in AniDB mapper, "
+                 f"{anidb_resolved} resolved to TMDB, "
+                 f"{anidb_not_mapped} not mapped")
+
+    stats = {
+        "scanned_items":  scanned,
+        "indexed_tmdb":   len(plex_ids),
+        "skipped_short":  0,
+        "directors_kept": 0,
+        "actors_kept":    0,
+        "no_tmdb_guid":   len(no_tmdb_guid),
+        "anidb_resolved": anidb_resolved,
+        "anidb_not_mapped": anidb_not_mapped,
+        "anidb_items":    anidb_items,
+        "duplicates":     [],
+    }
+    # directors/actors empty — TV show libraries don't have useful director metadata
+    return plex_ids, {}, {}, stats, no_tmdb_guid
