@@ -459,6 +459,7 @@ class ShikimoriAnalyzer:
                 "poster": poster,
                 "tmdb_id": (mapping.tmdb_show_id[0] if (mapping and mapping.tmdb_show_id) else 
                             (mapping.tmdb_movie_id[0] if (mapping and mapping.tmdb_movie_id) else None)),
+                "tmdb_type": "tv" if (mapping and mapping.tmdb_show_id) else "movie",
                 "anidb_id": mapping.anidb_id if mapping else None,
             }
             if status in groups: groups[status].append(display_item)

@@ -250,6 +250,12 @@ class TMDB:
         )
         return self.get(url)
 
+    def get_entity(self, tmdb_id: int, media_type: str = "movie") -> dict:
+        """Fetch an entity (movie or tv) from TMDB."""
+        if media_type == "tv":
+            return self.tv_show(tmdb_id)
+        return self.movie(tmdb_id)
+
     def tv_season_images(self, tmdb_tv_id: int, season_number: int) -> dict:
         """GET /3/tv/{tmdb_tv_id}/season/{season_number}/images
         Returns images for a season.

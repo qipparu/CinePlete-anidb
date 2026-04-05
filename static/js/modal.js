@@ -40,7 +40,8 @@ async function openMovieModal(tmdb, fallback = {}) {
 
   let md
   try {
-    md = await api(`/api/movie/${tmdb}`)
+    const type = fallback.tmdb_type || "movie"
+    md = await api(`/api/movie/${tmdb}?type=${type}`)
   } catch(e) {
     md = {}
   }
@@ -151,7 +152,7 @@ async function openMovieModal(tmdb, fallback = {}) {
       ${overseerrBtn}
       ${jellyseerrBtn}
       ${trailerBtn}
-      <a href="${md.tmdb_url || `https://www.themoviedb.org/movie/${tmdb}`}"
+      <a href="${md.tmdb_url || `https://www.themoviedb.org/${fallback.tmdb_type||"movie"}/${tmdb}`}"
          target="_blank" rel="noopener"
          class="btn-sm" style="text-decoration:none">↗ TMDB</a>
     </div>

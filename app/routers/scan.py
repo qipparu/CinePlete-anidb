@@ -87,18 +87,18 @@ def api_scan_status():
 # --------------------------------------------------
 
 @router.get("/api/movie/{tmdb_id}")
-def api_movie_detail(tmdb_id: int):
+def api_movie_detail(tmdb_id: int, type: str = Query(default="movie")):
     from app.tmdb import TMDB
     cfg     = load_config()
     api_key = cfg.get("TMDB", {}).get("TMDB_API_KEY")
     if not api_key:
         return {"error": "TMDB not configured"}
     t  = TMDB(api_key)
-    md = t.movie(tmdb_id)
+    md = t.get_entity(tmdb_id, type)
     if not md:
-        return {"error": "Movie not found"}
+        return {"error": f"{type.title()} not found"}
     credits_url = (
-        f"https://api.themoviedb.org/3/movie/{tmdb_id}/credits"
+        f"https://api.themoviedb.org/3/{type}/{tmdb_id}/credits"
         f"?api_key={api_key}"
     )
     credits = t.get(credits_url)
@@ -116,7 +116,7 @@ def api_movie_detail(tmdb_id: int):
     )
     # Fetch trailer (YouTube key)
     videos_url  = (
-        f"https://api.themoviedb.org/3/movie/{tmdb_id}/videos"
+        f"https://api.themoviedb.org/3/{type}/{tmdb_id}/videos"
         f"?api_key={api_key}"
     )
     videos_data = t.get(videos_url)
@@ -133,19 +133,19 @@ def api_movie_detail(tmdb_id: int):
 
     return {
         "tmdb":        tmdb_id,
-        "title":       md.get("title"),
-        "year":        (md.get("release_date") or "")[:4],
+        "title":       md.get("title") or md.get("name"),
+        "year":        (md.get("release_date") or md.get("first_air_date") or "")[:4],
         "poster":      t.poster_url(md.get("poster_path")),
         "backdrop":    backdrop,
         "overview":    md.get("overview", ""),
         "tagline":     md.get("tagline", ""),
         "rating":      md.get("vote_average", 0),
         "votes":       md.get("vote_count", 0),
-        "runtime":     md.get("runtime"),
+        "runtime":     md.get("runtime") or (md.get("episode_run_time") or [None])[0],
         "genres":      [g["name"] for g in md.get("genres") or []],
         "cast":        cast,
         "trailer_key": trailer_key,
-        "tmdb_url":    f"https://www.themoviedb.org/movie/{tmdb_id}",
+        "tmdb_url":    f"https://www.themoviedb.org/{type}/{tmdb_id}",
     }
 
 

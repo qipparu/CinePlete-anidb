@@ -27,7 +27,7 @@ function posterCard(m, extraTag = "") {
     : ""
 
   // Encode movie data on the button so add/remove toggles can update DATA without extra API calls
-  const movieData = JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,rating:m.rating,wishlist:m.wishlist}).replace(/"/g,'&quot;')
+  const movieData = JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,rating:m.rating,wishlist:m.wishlist,tmdb_type:m.tmdb_type}).replace(/"/g,'&quot;')
   const wBtn = m.wishlist
     ? `<button class="btn-sm btn-wishlisted" data-movie="${movieData}" onclick="event.stopPropagation();removeWishlist(${tmdb},this)">★</button>`
     : `<button class="btn-sm btn-wishlist"   data-movie="${movieData}" onclick="event.stopPropagation();addWishlist(${tmdb},this)">☆</button>`
@@ -41,7 +41,7 @@ function posterCard(m, extraTag = "") {
     ? `<img class="pc-img" src="${m.poster}" loading="lazy" alt=""/>`
     : `<div class="pc-no-img"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".3"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 2v20M17 2v20M2 12h20"/></svg><span>No Image</span></div>`
 
-  const mSafe = JSON.stringify({ tmdb: m.tmdb, title: m.title, year: m.year, poster: m.poster, wishlist: m.wishlist })
+  const mSafe = JSON.stringify({ tmdb: m.tmdb, title: m.title, year: m.year, poster: m.poster, wishlist: m.wishlist, tmdb_type: m.tmdb_type })
     .replace(/'/g, "\\'")
 
   return `
@@ -77,7 +77,7 @@ function movieCard(m, extraTag = ""){
     ? `<button class="btn-sm btn-radarr" onclick="addToRadarr(${m.tmdb},'${(m.title||'').replace(/'/g,"\\'")}',this)">+ Radarr</button>`
     : ""
 
-  const _mData = JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,rating:m.rating,wishlist:m.wishlist}).replace(/"/g,'&quot;')
+  const _mData = JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,rating:m.rating,wishlist:m.wishlist,tmdb_type:m.tmdb_type}).replace(/"/g,'&quot;')
   const wBtn = m.wishlist
     ? `<button class="btn-sm btn-wishlisted" data-movie="${_mData}" onclick="removeWishlist(${m.tmdb},this)">★ Wishlisted</button>`
     : `<button class="btn-sm btn-wishlist"   data-movie="${_mData}" onclick="addWishlist(${m.tmdb},this)">☆ Wishlist</button>`
@@ -86,7 +86,7 @@ function movieCard(m, extraTag = ""){
   const pop    = Math.round(m.popularity||0)
 
   return `
-  <div class="movie-card" onclick="openMovieModal(${m.tmdb},${JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,wishlist:m.wishlist}).replace(/"/g,'&quot;')})">
+  <div class="movie-card" onclick="openMovieModal(${m.tmdb},${JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,wishlist:m.wishlist,tmdb_type:m.tmdb_type}).replace(/"/g,'&quot;')})">
     <div class="movie-card-inner">
       ${poster}
       <div class="movie-body">
@@ -117,7 +117,7 @@ function lbPosterCard(m) {
                    box-shadow:0 1px 4px rgba(0,0,0,.4)">×${score}</div>`
     : ""
 
-  const _lbData = JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,rating:m.rating,wishlist:m.wishlist}).replace(/"/g,'&quot;')
+  const _lbData = JSON.stringify({tmdb:m.tmdb,title:m.title,year:m.year,poster:m.poster,rating:m.rating,wishlist:m.wishlist,tmdb_type:m.tmdb_type}).replace(/"/g,'&quot;')
   const wBtn = m.wishlist
     ? `<button class="btn-sm btn-wishlisted" data-movie="${_lbData}" onclick="event.stopPropagation();removeWishlist(${tmdb},this)">★</button>`
     : `<button class="btn-sm btn-wishlist"   data-movie="${_lbData}" onclick="event.stopPropagation();addWishlist(${tmdb},this)">☆ Wishlist</button>`
@@ -131,7 +131,7 @@ function lbPosterCard(m) {
     ? `<img class="pc-img" src="${m.poster}" loading="lazy" alt=""/>`
     : `<div class="pc-no-img"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".3"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M7 2v20M17 2v20M2 12h20"/></svg><span>No Image</span></div>`
 
-  const mSafe = JSON.stringify({ tmdb: m.tmdb, title: m.title, year: m.year, poster: m.poster, wishlist: m.wishlist })
+  const mSafe = JSON.stringify({ tmdb: m.tmdb, title: m.title, year: m.year, poster: m.poster, wishlist: m.wishlist, tmdb_type: m.tmdb_type })
     .replace(/'/g, "\\'")
 
   return `

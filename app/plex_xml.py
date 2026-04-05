@@ -118,8 +118,9 @@ def scan_movies(lib_cfg=None):
     Falls back to AniDB→TMDB mapping when anidb:// GUID is present
     but no tmdb:// GUID is found.
 
-    Returns: (plex_ids, directors, actors, stats, no_tmdb_guid)
+    Returns: (plex_ids, directors, actors, stats, no_tmdb_guid, plex_types)
     stats["anidb_items"] is an empty list here (movies don't have show-level season data).
+    plex_types: {tmdb_id: "movie"}
     """
     lc = _build_lib_cfg(lib_cfg)
     short_movie_limit = int(lc.get("short_movie_limit", 60))
@@ -136,6 +137,7 @@ def scan_movies(lib_cfg=None):
         return _mapper
 
     plex_ids = {}
+    plex_types = {}  # {tmdb_id: "movie"|"tv"}
     plex_editions = {}
     tmdb_id_dupes = {}
     directors = defaultdict(set)
@@ -200,6 +202,7 @@ def scan_movies(lib_cfg=None):
                 tmdb_id_dupes[tmdb_id].append({"title": title, "edition": edition})
             else:
                 plex_ids[tmdb_id] = title
+                plex_types[tmdb_id] = "movie"
                 plex_editions[tmdb_id] = edition
             for d in v.findall("Director"):
                 tag = d.attrib.get("tag")
@@ -233,7 +236,7 @@ def scan_movies(lib_cfg=None):
             for tmdb_id, titles in tmdb_id_dupes.items()
         ],
     }
-    return plex_ids, directors, actors, stats, no_tmdb_guid
+    return plex_ids, directors, actors, stats, no_tmdb_guid, plex_types
 
 
 def scan_shows(lib_cfg=None):
@@ -247,7 +250,7 @@ def scan_shows(lib_cfg=None):
     stats["anidb_items"] contains full MappingEntry dicts for ALL anidb-tagged shows —
     this is the data consumed by scanner._analyze_anime_seasons().
 
-    Returns: (plex_ids, directors={}, actors={}, stats, no_tmdb_guid)
+    Returns: (plex_ids, directors={}, actors={}, stats, no_tmdb_guid, plex_types)
     """
     lc = _build_lib_cfg(lib_cfg)
     page_size = int(lc.get("page_size", 500))
@@ -257,6 +260,7 @@ def scan_shows(lib_cfg=None):
     mapper = get_mapper()
 
     plex_ids: dict[int, str] = {}         # {tmdb_id: title}
+    plex_types: dict[int, str] = {}       # {tmdb_id: "tv"}
     no_tmdb_guid: list[dict] = []
     anidb_items: list[dict]  = []         # all resolvable anidb entries
     start     = 0
@@ -325,6 +329,7 @@ def scan_shows(lib_cfg=None):
             if tmdb_id:
                 if tmdb_id not in plex_ids:
                     plex_ids[tmdb_id] = title
+                    plex_types[tmdb_id] = "tv"
             else:
                 # If it's an anime that mapped/detected successfully, don't flag as missing GUID
                 is_detected = (anidb_raw and anidb_raw.isdigit()) or (tvdb_raw and tvdb_raw.isdigit())
@@ -358,4 +363,4 @@ def scan_shows(lib_cfg=None):
         "duplicates":     [],
     }
     # directors/actors empty — TV show libraries don't have useful director metadata
-    return plex_ids, {}, {}, stats, no_tmdb_guid
+    return plex_ids, {}, {}, stats, no_tmdb_guid, plex_types

@@ -100,14 +100,15 @@ def write_results(results: dict):
     os.replace(tmp, RESULTS_FILE)
 
 
-def _analyze_collections(plex_ids, tmdb, ignore_franchises, ignore_movies, wishlist_movies):
+def _analyze_collections(plex_ids, plex_types, tmdb, ignore_franchises, ignore_movies, wishlist_movies):
     """Extract collection/franchise data from the library.
 
     Returns (franchises, franchise_completion).
     """
     collection_ids: dict = {}
     for mid in plex_ids:
-        md = tmdb.movie(mid)
+        m_type = plex_types.get(mid, "movie")
+        md = tmdb.get_entity(mid, m_type)
         if not md:
             continue
         c = md.get("belongs_to_collection")
@@ -154,6 +155,7 @@ def _analyze_collections(plex_ids, tmdb, ignore_franchises, ignore_movies, wishl
                 "votes":      p.get("vote_count", 0),
                 "rating":     p.get("vote_average", 0),
                 "wishlist":   pid in wishlist_movies,
+                "tmdb_type":  "movie",
             })
 
         franchises.append({
@@ -172,7 +174,7 @@ def _analyze_collections(plex_ids, tmdb, ignore_franchises, ignore_movies, wishl
     return franchises, franchise_completion
 
 
-def _analyze_directors(directors_map, plex_ids, tmdb, ignore_directors, ignore_movies, wishlist_movies):
+def _analyze_directors(directors_map, plex_ids, plex_types, tmdb, ignore_directors, ignore_movies, wishlist_movies, min_votes, max_per_director):
     """Analyze director filmographies for missing films.
 
     Returns (directors, director_missing_total).
@@ -220,6 +222,7 @@ def _analyze_directors(directors_map, plex_ids, tmdb, ignore_directors, ignore_m
                 "votes":      m.get("vote_count", 0),
                 "rating":     m.get("vote_average", 0),
                 "wishlist":   mid in wishlist_movies,
+                "tmdb_type":  "movie",
             })
 
         if missing:
@@ -267,6 +270,7 @@ def _build_classics(tmdb, plex_ids, ignore_movies, wishlist_movies, pages, min_v
                 "votes":      votes,
                 "rating":     rating,
                 "wishlist":   mid in wishlist_movies,
+                "tmdb_type":  "movie",
             })
             if len(classics) >= max_results:
                 break
@@ -278,7 +282,7 @@ def _build_classics(tmdb, plex_ids, ignore_movies, wishlist_movies, pages, min_v
     return sorted(classics, key=lambda x: (-x["rating"], -x["votes"]))
 
 
-def _build_suggestions(plex_ids, tmdb, overrides, ignore_movies, wishlist_movies, max_results, min_score):
+def _build_suggestions(plex_ids, plex_types, tmdb, overrides, ignore_movies, wishlist_movies, max_results, min_score):
     """Build recommendation-based suggestions from library films.
 
     Returns list of suggestion dicts.
@@ -347,6 +351,7 @@ def _build_suggestions(plex_ids, tmdb, overrides, ignore_movies, wishlist_movies
             "rating":     md.get("vote_average", 0),
             "wishlist":   rid in wishlist_movies,
             "rec_score":  score,
+            "tmdb_type":  "movie",
         })
 
         if len(suggestions) >= max_results:
@@ -356,7 +361,7 @@ def _build_suggestions(plex_ids, tmdb, overrides, ignore_movies, wishlist_movies
     return suggestions
 
 
-def _analyze_actors(actors_map, plex_ids, tmdb, ignore_actors, ignore_movies, wishlist_movies, min_votes, max_per_actor):
+def _analyze_actors(actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignore_movies, wishlist_movies, min_votes, max_per_actor):
     """Analyze actor filmographies for high-vote missing films.
 
     Returns (actors, actor_missing_total).
@@ -412,6 +417,7 @@ def _analyze_actors(actors_map, plex_ids, tmdb, ignore_actors, ignore_movies, wi
                 "votes":      m.get("vote_count", 0),
                 "rating":     m.get("vote_average", 0),
                 "wishlist":   mid in wishlist_movies,
+                "tmdb_type":  plex_types.get(mid, "movie"),
             }
             if mid in plex_ids:
                 if len(have_list) < 10:
@@ -808,6 +814,7 @@ def _analyze_anime_collections(anidb_items: list, tmdb, ignore_franchises: set, 
                 "popularity": m_pop,
                 "genre_ids": m_genres,
                 "wishlist": tmdb_id in wishlist_movies if tmdb_id else False,
+                "tmdb_type": "tv",
             })
 
         franchises.append({
@@ -898,7 +905,8 @@ def build():
             from app.jellyfin_api import scan_movies, scan_shows
         else:
             from app.plex_xml import scan_movies, scan_shows
-        return scan_shows(lib) if content_type == "shows" else scan_movies(lib)
+        res = scan_shows(lib) if content_type == "shows" else scan_movies(lib)
+        return res
 
     all_results = []
     if len(enabled_libs) == 1:
@@ -911,6 +919,7 @@ def build():
 
     # Merge — deduplicate movies by TMDB ID across libraries
     plex_ids     = {}
+    plex_types   = {}
     directors_map = _defaultdict(set)
     actors_map    = _defaultdict(set)
     no_tmdb_guid  = []
@@ -918,8 +927,9 @@ def build():
     plex_stats    = {}
     anidb_items   = []   # all anime entries from show-type libraries
 
-    for ids, dirs, acts, stats, no_guid in all_results:
+    for ids, dirs, acts, stats, no_guid, ptypes in all_results:
         plex_ids.update(ids)
+        plex_types.update(ptypes)
         anidb_items.extend(stats.pop("anidb_items", []))
         for name, tmdb_ids in dirs.items():
             directors_map[name].update(tmdb_ids)
@@ -972,20 +982,22 @@ def build():
     _set_step(2, f"{len(plex_ids)} movies")
     tmdb_not_found = []
     for mid in plex_ids:
-        md = tmdb.movie(mid)
+        m_type = plex_types.get(mid, "movie")
+        md = tmdb.get_entity(mid, m_type)
         if not md:
             tmdb_not_found.append({"tmdb": mid, "title": plex_ids[mid]})
 
     # ---- COLLECTIONS ------------------------------------------
     _set_step(3)
     franchises, franchise_completion = _analyze_collections(
-        plex_ids, tmdb, ignore_franchises, ignore_movies, wishlist_movies
+        plex_ids, plex_types, tmdb, ignore_franchises, ignore_movies, wishlist_movies
     )
 
     # ---- DIRECTORS --------------------------------------------
     _set_step(4, f"{len(directors_map)} directors")
     directors, director_missing_total = _analyze_directors(
-        directors_map, plex_ids, tmdb, ignore_directors, ignore_movies, wishlist_movies
+        directors_map, plex_ids, plex_types, tmdb, ignore_directors, ignore_movies, wishlist_movies,
+        directors_min_votes, directors_max_results
     )
 
     # ---- CLASSICS ---------------------------------------------
@@ -997,15 +1009,15 @@ def build():
     # ---- SUGGESTIONS (based on your library) ------------------
     _set_step(5, f"{len(plex_ids)} library films")
     suggestions = _build_suggestions(
-        plex_ids, tmdb, overrides, ignore_movies, wishlist_movies,
+        plex_ids, plex_types, tmdb, overrides, ignore_movies, wishlist_movies,
         suggestions_max_results, suggestions_min_score
     )
 
     # ---- ACTORS -----------------------------------------------
     _set_step(6, f"{len(actors_map)} actors")
     actors, actor_missing_total = _analyze_actors(
-        actors_map, plex_ids, tmdb, ignore_actors, ignore_movies, wishlist_movies,
-        actor_min_votes, actor_max_results_per_actor
+        actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignore_movies, wishlist_movies,
+        actors_min_votes, actors_max_results
     )
 
     # ---- WISHLIST ---------------------------------------------
@@ -1072,6 +1084,7 @@ def build():
                     "year": None,
                     "poster": m.get("poster") or a["poster"],
                     "overview": "",
+                    "tmdb_type": "tv",
                 })
             
             anime_franchises.append({
@@ -1136,6 +1149,7 @@ def build():
         "wishlist":       wishlist,
         "anime":          anime_list,
         "anime_stats":    anime_stats,
+        "plex_types":     plex_types,
     }
 
     tmdb.flush()
