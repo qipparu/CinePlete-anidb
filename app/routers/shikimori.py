@@ -169,44 +169,79 @@ class ShikimoriMapper:
             return None
 
     def _parse(self, data: dict):
-        mal_map   = {}
-        anidb_map = {}
-        tvdb_map  = {}
-        tmdb_map  = {}
+        """
+        Parses V3 dictionary-based mappings.
+        Data structure: { "provider:id[:scope]": { "target_provider:id[:scope]": { "range": "range" } } }
+        """
+        mal_map:   Dict[int, ShikimoriMappingEntry] = {}
+        anidb_map: Dict[int, ShikimoriMappingEntry] = {}
+        tvdb_map:  Dict[int, ShikimoriMappingEntry] = {}
+        tmdb_map:  Dict[int, ShikimoriMappingEntry] = {}
 
-        def _as_list(val):
-            if val is None: return []
-            if isinstance(val, (int, str)): return [val]
-            return val
+        def _split_descriptor(desc: str):
+            parts = desc.split(":")
+            provider = parts[0]
+            id_val = parts[1] if len(parts) > 1 else None
+            return provider, id_val
 
-        for internal_id, entry in data.items():
-            mal_ids = _as_list(entry.get("mal_id"))
-            mapping = ShikimoriMappingEntry(
-                internal_id = internal_id,
-                anidb_id    = entry.get("anidb_id"),
-                mal_ids     = mal_ids,
-                tvdb_id     = _as_list(entry.get("tvdb_id")),
-                tmdb_show_id = _as_list(entry.get("tmdb_show_id")),
-                tmdb_movie_id = _as_list(entry.get("tmdb_movie_id")),
-                imdb_ids    = _as_list(entry.get("imdb_id"))
-            )
-            for mid in mal_ids:
-                mal_map[int(mid)] = mapping
+        # We treat each source -> targets block as a cluster of related IDs.
+        # Note: In V3, an entry can be both a source and a target.
+        clusters: List[Dict[str, set]] = []
+
+        for source_desc, targets in data.items():
+            if source_desc.startswith("$"): continue # Skip metadata
             
-            if mapping.anidb_id:
-                anidb_map[int(mapping.anidb_id)] = mapping
+            cluster = {"mal": set(), "anidb": set(), "tvdb": set(), "tmdb_show": set(), "tmdb_movie": set(), "internal": source_desc}
+            
+            # Add source to cluster
+            src_prov, src_id = _split_descriptor(source_desc)
+            if src_prov == "mal": cluster["mal"].add(int(src_id))
+            elif src_prov == "anidb": cluster["anidb"].add(int(src_id))
+            elif src_prov == "tvdb_show": cluster["tvdb"].add(int(src_id))
+            elif src_prov == "tmdb_show": cluster["tmdb_show"].add(int(src_id))
+            elif src_prov == "tmdb_movie": cluster["tmdb_movie"].add(int(src_id))
+
+            # Add targets to cluster
+            for target_desc in targets.keys():
+                trg_prov, trg_id = _split_descriptor(target_desc)
+                if trg_prov == "mal": cluster["mal"].add(int(trg_id))
+                elif trg_prov == "anidb": cluster["anidb"].add(int(trg_id))
+                elif trg_prov == "tvdb_show": cluster["tvdb"].add(int(trg_id))
+                elif trg_prov == "tmdb_show": cluster["tmdb_show"].add(int(trg_id))
+                elif trg_prov == "tmdb_movie": cluster["tmdb_movie"].add(int(trg_id))
+            
+            clusters.append(cluster)
+
+        # Reconstruct ShikimoriMappingEntry from clusters.
+        # If multiple clusters share a MAL ID, we could merge them, but for the analyzer,
+        # having the first match is usually sufficient for identity.
+        for clus in clusters:
+            mapping = ShikimoriMappingEntry(
+                internal_id = clus["internal"],
+                anidb_id    = list(clus["anidb"])[0] if clus["anidb"] else None,
+                mal_ids     = list(clus["mal"]),
+                tvdb_id     = list(clus["tvdb"]),
+                tmdb_show_id = list(clus["tmdb_show"]),
+                tmdb_movie_id = list(clus["tmdb_movie"]),
+                imdb_ids    = []
+            )
+            
+            for mid in mapping.mal_ids:
+                if mid not in mal_map: mal_map[mid] = mapping
+            if mapping.anidb_id and mapping.anidb_id not in anidb_map:
+                anidb_map[mapping.anidb_id] = mapping
             for tid in mapping.tvdb_id:
-                tvdb_map[int(tid)] = mapping
+                if tid not in tvdb_map: tvdb_map[tid] = mapping
             for tid in mapping.tmdb_show_id:
-                tmdb_map[int(tid)] = mapping
+                if tid not in tmdb_map: tmdb_map[tid] = mapping
             for tid in mapping.tmdb_movie_id:
-                tmdb_map[int(tid)] = mapping
+                if tid not in tmdb_map: tmdb_map[tid] = mapping
 
         self._mal_to_entry   = mal_map
         self._anidb_to_entry = anidb_map
         self._tvdb_to_entry  = tvdb_map
         self._tmdb_to_entry  = tmdb_map
-        log.info(f"Shikimori Mapping: parsed {len(mal_map)} MAL IDs and reverse maps from {len(data)} entries")
+        log.info(f"Shikimori Mapping V3: parsed {len(mal_map)} MAL IDs from {len(data)} mapping blocks")
 
     def lookup_mal(self, mal_id: int) -> Optional[ShikimoriMappingEntry]:
         try: return self._mal_to_entry.get(int(mal_id))
@@ -233,8 +268,12 @@ def get_shikimori_mapper() -> ShikimoriMapper:
         with _mapper_lock:
             if _mapper_instance is None:
                 cfg = load_config().get("SHIKIMORI", {})
-                url = cfg.get("SHIKIMORI_MAPPING_URL", "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.json")
-                edits_url = cfg.get("SHIKIMORI_EDITS_URL", "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.edits.yaml")
+                # NEW V3 URLs
+                default_url = "https://github.com/anibridge/anibridge-mappings/releases/download/v3/mappings.json"
+                default_edits = "https://raw.githubusercontent.com/anibridge/anibridge-mappings/refs/heads/main/mappings.edits.yaml"
+                
+                url = cfg.get("SHIKIMORI_MAPPING_URL") or default_url
+                edits_url = cfg.get("SHIKIMORI_EDITS_URL") or default_edits
                 ttl = cfg.get("SHIKIMORI_CACHE_TTL_DAYS", 7)
                 m = ShikimoriMapper(url, edits_url, ttl)
                 m.load()
