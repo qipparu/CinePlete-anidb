@@ -502,49 +502,43 @@ def _get_best_season_poster(tmdb_tv_id: int, tvdb_id: int, season_num: str, tmdb
     source_priority = [s.strip().lower() for s in cfg.get("TVDB", {}).get("POSTER_SOURCE_PRIORITY", "tvdb,tmdb").split(",") if s.strip()]
     if not source_priority:
         source_priority = ["tvdb", "tmdb"]
-        
-    tvdb_artworks = None
-    tmdb_season_images = None
+    
+    # Cache for results per language to avoid redundant api calls within same show/season loop
+    # but since this is called for each season, we can't easily cache across calls here without higher scope.
+    # However, source_priority is outer loop in user request, but our implementation is:
+    # for lang in lang_priority:
+    #   for source in source_priority:
     
     for lang in lang_priority:
-        tmdb_lang = lang
-        tvdb_lang = TVDB_LANG_MAP.get(lang, lang)
-        
         for source in source_priority:
             if source == "tvdb" and tvdb_id and tvdb:
-                if tvdb_artworks is None:
-                    try:
-                        ext = tvdb.series_extended(tvdb_id)
-                        seasons = ext.get("seasons", [])
-                        valid_season_ids = {s.get("id") for s in seasons if str(s.get("number")) == season_num}
-                        arts = ext.get("artworks", [])
-                        tvdb_artworks = [a for a in arts if a.get("type") == 3 and a.get("seasonId") in valid_season_ids]
-                    except Exception:
-                        tvdb_artworks = []
-                        
-                valid_arts = [a for a in tvdb_artworks if str(a.get("language")).lower() == tvdb_lang]
-                if valid_arts:
-                    valid_arts.sort(key=lambda x: x.get("score", 0), reverse=True)
-                    best = valid_arts[0].get("image")
-                    if best:
-                        return f"https://artworks.thetvdb.com/banners/{best}" if not best.startswith("http") else best
+                try:
+                    images = tvdb.season_images(tvdb_id, lang)
+                    if images:
+                        # Filter by season number (subKey in v2)
+                        valid_arts = [img for img in images if str(img.get("subKey")) == str(season_num)]
+                        if valid_arts:
+                            # Sort by ratingsInfo.average
+                            valid_arts.sort(key=lambda x: (x.get("ratingsInfo") or {}).get("average") or 0, reverse=True)
+                            best = valid_arts[0].get("fileName")
+                            if best:
+                                return f"https://artworks.thetvdb.com/banners/{best}"
+                except Exception as ex:
+                    log.debug(f"TVDB v2 poster check failed for {tvdb_id} {lang}: {ex}")
                         
             elif source == "tmdb" and tmdb_tv_id and tmdb:
-                if tmdb_season_images is None:
-                    try:
-                        resp = tmdb.tv_season_images(tmdb_tv_id, season_num)
-                        tmdb_season_images = resp.get("posters", [])
-                    except Exception:
-                        tmdb_season_images = []
-                        
-                valid_arts = [a for a in tmdb_season_images if str(a.get("iso_639_1")).lower() == tmdb_lang]
-                if valid_arts:
-                    valid_arts.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
-                    best = valid_arts[0].get("file_path")
-                    if best:
-                        pos = tmdb.poster_url(best)
-                        if pos:
-                            return pos
+                try:
+                    resp = tmdb.tv_season_images(tmdb_tv_id, season_num)
+                    tmdb_season_images = resp.get("posters", [])
+                    if tmdb_season_images:
+                        valid_arts = [a for a in tmdb_season_images if str(a.get("iso_639_1")).lower() == lang.lower()]
+                        if valid_arts:
+                            valid_arts.sort(key=lambda x: x.get("vote_average", 0), reverse=True)
+                            best = valid_arts[0].get("file_path")
+                            if best:
+                                return tmdb.poster_url(best)
+                except Exception as ex:
+                    log.debug(f"TMDB poster check failed for {tmdb_tv_id} {lang}: {ex}")
 
     return fallback_poster
 
@@ -554,7 +548,6 @@ def _analyze_anime_seasons(anidb_items: list, tmdb, tvdb, cfg: dict) -> tuple[li
     has vs. all seasons known in the anime-list-master.xml mapping.
 
     Returns (anime_list, anime_stats) where anime_list is sorted by
-    most missing seasons first.
     most missing seasons first.
     """
     if not anidb_items:
