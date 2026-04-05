@@ -7,6 +7,7 @@ import json
 import time
 import threading
 import requests
+import yaml
 import xml.etree.ElementTree as ET
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ router = APIRouter()
 
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 MAPPING_CACHE_FILE = os.path.join(DATA_DIR, "shikimori_mappings_cache.json")
+EDITS_CACHE_FILE   = os.path.join(DATA_DIR, "shikimori_edits_cache.yaml")
 
 @dataclass
 class ShikimoriMappingEntry:
@@ -37,8 +39,9 @@ class ShikimoriMapper:
     Handles downloading and searching the PlexAniBridge-Mappings v2 JSON.
     Maps MAL IDs (Shikimori target_id) to AniDB, TVDB, and TMDB.
     """
-    def __init__(self, mapping_url: str, ttl_days: int = 7):
+    def __init__(self, mapping_url: str, edits_url: str, ttl_days: int = 7):
         self.mapping_url = mapping_url
+        self.edits_url   = edits_url
         self.ttl_seconds = ttl_days * 86_400
         self._lock = threading.Lock()
         self._mal_to_entry: Dict[int, ShikimoriMappingEntry] = {}
@@ -46,23 +49,77 @@ class ShikimoriMapper:
 
     def load(self, force: bool = False):
         with self._lock:
-            cache_age = self._get_cache_age()
+            # Paths for local overrides in the workspace
+            workspace_root = os.getcwd()
+            local_json = os.path.join(workspace_root, "shikimori", "mappings.json")
+            local_yaml = os.path.join(workspace_root, "shikimori", "mappings.edits.yaml")
+            
             data = None
+            edits = None
+            
+            cache_age = self._get_cache_age()
+            is_stale = force or cache_age >= self.ttl_seconds
 
-            if not force and cache_age < self.ttl_seconds:
-                data = self._load_from_cache()
-                if data:
-                    log.info(f"Shikimori Mapping: using cached file (age {cache_age/3600:.1f}h)")
+            # --- 1. Load/Download Base Mappings (JSON) ---
+            if os.path.exists(local_json):
+                try:
+                    with open(local_json, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        log.info(f"Shikimori Mapping: loaded local JSON {local_json}")
+                except Exception as e:
+                    log.warning(f"Shikimori Mapping: failed local JSON — {e}")
 
             if data is None:
-                data = self._download_mapping()
-                if data:
-                    self._save_to_cache(data)
-                else:
-                    data = self._load_from_cache()
-                    if not data:
-                        log.error("Shikimori Mapping: No cache and download failed.")
-                        return
+                if not is_stale:
+                    data = self._load_json_from_cache()
+                
+                if data is None:
+                    data = self._download_file(self.mapping_url, "JSON")
+                    if data:
+                        self._save_json_to_cache(data)
+                    else:
+                        data = self._load_json_from_cache()
+            
+            if data is None:
+                log.error("Shikimori Mapping: No local file, no cache, and download failed.")
+                return
+
+            # --- 2. Load/Download Edits (YAML) ---
+            if os.path.exists(local_yaml):
+                try:
+                    with open(local_yaml, "r", encoding="utf-8") as f:
+                        edits = yaml.safe_load(f)
+                        log.info(f"Shikimori Mapping: loaded local YAML edits {local_yaml}")
+                except Exception as e:
+                    log.warning(f"Shikimori Mapping: failed local YAML — {e}")
+
+            if edits is None:
+                if not is_stale:
+                    edits = self._load_yaml_from_cache()
+                
+                if edits is None and self.edits_url:
+                    edits_raw = self._download_file(self.edits_url, "YAML", is_json=False)
+                    if edits_raw:
+                        try:
+                            edits = yaml.safe_load(edits_raw)
+                            self._save_yaml_to_cache(edits_raw)
+                        except Exception as e:
+                            log.warning(f"Shikimori Edits: failed to parse downloaded YAML — {e}")
+                    else:
+                        edits = self._load_yaml_from_cache()
+
+            # --- 3. Merge Edits ---
+            if edits:
+                log.info(f"Shikimori Mapping: applying {len(edits)} overrides")
+                for internal_id, edit_values in edits.items():
+                    str_id = str(internal_id)
+                    if str_id in data:
+                        if isinstance(edit_values, dict) and isinstance(data[str_id], dict):
+                            data[str_id].update(edit_values)
+                        else:
+                            data[str_id] = edit_values
+                    else:
+                        data[str_id] = edit_values
 
             self._parse(data)
             self._ready = True
@@ -73,48 +130,60 @@ class ShikimoriMapper:
         except OSError:
             return float("inf")
 
-    def _load_from_cache(self) -> Optional[dict]:
+    def _load_json_from_cache(self) -> Optional[dict]:
         try:
             with open(MAPPING_CACHE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return None
 
-    def _save_to_cache(self, data: dict):
+    def _save_json_to_cache(self, data: dict):
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(MAPPING_CACHE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f)
 
-    def _download_mapping(self) -> Optional[dict]:
+    def _load_yaml_from_cache(self) -> Optional[dict]:
         try:
-            log.info(f"Downloading Shikimori mappings from {self.mapping_url}")
-            r = requests.get(self.mapping_url, timeout=60)
+            with open(EDITS_CACHE_FILE, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+        except Exception:
+            return None
+
+    def _save_yaml_to_cache(self, content_str: str):
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(EDITS_CACHE_FILE, "w", encoding="utf-8") as f:
+            f.write(content_str)
+
+    def _download_file(self, url: str, label: str, is_json: bool = True) -> Any:
+        try:
+            log.info(f"Downloading Shikimori {label} from {url}")
+            r = requests.get(url, timeout=60)
             r.raise_for_status()
-            return r.json()
+            return r.json() if is_json else r.text
         except Exception as e:
-            log.warning(f"Shikimori Mapping: download failed — {e}")
+            log.warning(f"Shikimori {label}: download failed — {e}")
             return None
 
     def _parse(self, data: dict):
         mal_map = {}
-        for internal_id, entry in data.items():
-            mal_ids_raw = entry.get("mal_id", [])
-            if isinstance(mal_ids_raw, int):
-                mal_ids = [mal_ids_raw]
-            else:
-                mal_ids = mal_ids_raw
+        def _as_list(val):
+            if val is None: return []
+            if isinstance(val, (int, str)): return [val]
+            return val
 
+        for internal_id, entry in data.items():
+            mal_ids = _as_list(entry.get("mal_id"))
             mapping = ShikimoriMappingEntry(
                 internal_id = internal_id,
-                anidb_id    = entry.get("anidb_id"),
+                anidb_id    = entry.get("anidb_id"), # usually single int
                 mal_ids     = mal_ids,
-                tvdb_id     = entry.get("tvdb_id"),
-                tmdb_show_id = entry.get("tmdb_show_id"),
-                tmdb_movie_id = entry.get("tmdb_movie_id"),
-                imdb_ids    = entry.get("imdb_id", []) if isinstance(entry.get("imdb_id"), list) else ([entry.get("imdb_id")] if entry.get("imdb_id") else [])
+                tvdb_id     = _as_list(entry.get("tvdb_id")),
+                tmdb_show_id = _as_list(entry.get("tmdb_show_id")),
+                tmdb_movie_id = _as_list(entry.get("tmdb_movie_id")),
+                imdb_ids    = _as_list(entry.get("imdb_id"))
             )
             for mid in mal_ids:
-                mal_map[mid] = mapping
+                mal_map[int(mid)] = mapping
         self._mal_to_entry = mal_map
         log.info(f"Shikimori Mapping: parsed {len(mal_map)} MAL IDs from {len(data)} entries")
 
@@ -131,8 +200,9 @@ def get_shikimori_mapper() -> ShikimoriMapper:
             if _mapper_instance is None:
                 cfg = load_config().get("SHIKIMORI", {})
                 url = cfg.get("SHIKIMORI_MAPPING_URL", "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.json")
+                edits_url = cfg.get("SHIKIMORI_EDITS_URL", "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.edits.yaml")
                 ttl = cfg.get("SHIKIMORI_CACHE_TTL_DAYS", 7)
-                m = ShikimoriMapper(url, ttl)
+                m = ShikimoriMapper(url, edits_url, ttl)
                 m.load()
                 _mapper_instance = m
     return _mapper_instance
@@ -232,16 +302,18 @@ class ShikimoriAnalyzer:
 
             mapping = self.mapper.lookup_mal(mal_id)
             is_owned = False
+            def _is_owned(id_val, container):
+                if not id_val: return False
+                if isinstance(id_val, list):
+                    return any(str(i) in container or i in container for i in id_val)
+                return str(id_val) in container or id_val in container
+
             if mapping:
-                if mapping.anidb_id and mapping.anidb_id in self.owned_anidb:
+                if _is_owned(mapping.anidb_id, self.owned_anidb):
                     is_owned = True
-                elif mapping.tmdb_show_id and str(mapping.tmdb_show_id) in self.owned_tmdb:
+                elif _is_owned(mapping.tmdb_show_id, self.owned_tmdb):
                     is_owned = True
-                elif mapping.tmdb_movie_id and str(mapping.tmdb_movie_id) in self.owned_tmdb:
-                    is_owned = True
-                elif mapping.tmdb_show_id and mapping.tmdb_show_id in self.owned_tmdb:
-                    is_owned = True
-                elif mapping.tmdb_movie_id and mapping.tmdb_movie_id in self.owned_tmdb:
+                elif _is_owned(mapping.tmdb_movie_id, self.owned_tmdb):
                     is_owned = True
 
             if is_owned: stats["owned"] += 1

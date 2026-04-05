@@ -523,7 +523,8 @@ function renderConfig(){
         ${field("cfg_shk_url", "Export URL/Path", shk.SHIKIMORI_EXPORT_URL||"")}
         ${hint("Enter the URL or local path to your <b>JSON</b> or <b>XML</b> export file. <br>E.g. <code style='color:var(--gold)'>https://shikimori.one/user/list_export/animes.json</code> or <code style='color:var(--gold)'>/data/mal_export.xml</code>")}
         ${field("cfg_shk_mapping", "Mapping JSON URL", shk.SHIKIMORI_MAPPING_URL||"")}
-        ${hint("Default: v2 mappings from PlexAniBridge-Mappings. Usually left as is.")}
+        ${field("cfg_shk_edits", "Mapping Edits URL", shk.SHIKIMORI_EDITS_URL||"")}
+        ${hint("Download and merge manual overrides from a remote YAML file.")}
       </div>
 
       <button class="btn-primary" onclick="saveConfig()">Save Configuration</button>
@@ -644,6 +645,7 @@ async function saveConfig(){
       SHIKIMORI_ENABLED:      vc("cfg_shk_enabled"),
       SHIKIMORI_EXPORT_URL:   v("cfg_shk_url"),
       SHIKIMORI_MAPPING_URL:  v("cfg_shk_mapping"),
+      SHIKIMORI_EDITS_URL:    v("cfg_shk_edits"),
     },
   }
 

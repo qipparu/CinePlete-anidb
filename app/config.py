@@ -114,6 +114,7 @@ DEFAULT_CONFIG = {
         "SHIKIMORI_ENABLED":     True,
         "SHIKIMORI_EXPORT_URL":  "",
         "SHIKIMORI_MAPPING_URL": "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.json",
+        "SHIKIMORI_EDITS_URL":   "https://raw.githubusercontent.com/eliasbenb/PlexAniBridge-Mappings/refs/heads/v2/mappings.edits.yaml",
         "SHIKIMORI_CACHE_TTL_DAYS": 7,
     },
     "AUTH": {
