@@ -58,6 +58,7 @@ def _make_tmdb():
     tmdb.person_credits.return_value = {}
     tmdb.top_rated.return_value = {}
     tmdb.recommendations.return_value = {}
+    tmdb.get_entity.return_value = {}
     tmdb.poster_url.return_value = None
     return tmdb
 
@@ -278,7 +279,7 @@ class TestAnalyzeCollections(unittest.TestCase):
     def test_movie_with_collection_appears_in_franchises(self):
         tmdb = _make_tmdb()
         col  = {"id": 10, "name": "Test Collection"}
-        tmdb.movie.side_effect = lambda mid: _movie(mid, collection=col) if mid == 1 else {}
+        tmdb.get_entity.side_effect = lambda mid, mtype: (_movie(mid, collection=col) if mid == 1 else {})
         tmdb.collection.return_value = {
             "parts": [
                 {"id": 1, "title": "Part 1", "release_date": "2000-01-01"},
@@ -291,21 +292,21 @@ class TestAnalyzeCollections(unittest.TestCase):
 
     def test_movie_without_collection_not_in_franchises(self):
         tmdb = _make_tmdb()
-        tmdb.movie.return_value = _movie(1)
+        tmdb.get_entity.return_value = _movie(1)
         franchises, _ = self._run({1: "Movie"}, tmdb)
         assert franchises == []
 
     def test_ignored_franchise_is_skipped(self):
         tmdb = _make_tmdb()
         col  = {"id": 10, "name": "Ignore Me"}
-        tmdb.movie.side_effect = lambda mid: _movie(mid, collection=col)
+        tmdb.get_entity.side_effect = lambda mid, mtype: _movie(mid, collection=col)
         franchises, _ = self._run({1: "Movie"}, tmdb, ignore_franchises={"Ignore Me"})
         assert franchises == []
 
     def test_missing_movie_appears_in_missing_list(self):
         tmdb = _make_tmdb()
         col  = {"id": 10, "name": "Col"}
-        tmdb.movie.side_effect = lambda mid: _movie(mid, collection=col) if mid == 1 else {}
+        tmdb.get_entity.side_effect = lambda mid, mtype: (_movie(mid, collection=col) if mid == 1 else {})
         tmdb.collection.return_value = {
             "parts": [
                 {"id": 1, "title": "Part 1", "release_date": "2000-01-01"},
@@ -319,7 +320,7 @@ class TestAnalyzeCollections(unittest.TestCase):
     def test_already_owned_movie_not_in_missing(self):
         tmdb = _make_tmdb()
         col  = {"id": 10, "name": "Col"}
-        tmdb.movie.side_effect = lambda mid: _movie(mid, collection=col)
+        tmdb.get_entity.side_effect = lambda mid, mtype: _movie(mid, collection=col)
         tmdb.collection.return_value = {
             "parts": [
                 {"id": 1, "title": "Part 1", "release_date": "2000-01-01"},
@@ -332,7 +333,7 @@ class TestAnalyzeCollections(unittest.TestCase):
     def test_future_release_not_in_missing(self):
         tmdb = _make_tmdb()
         col  = {"id": 10, "name": "Col"}
-        tmdb.movie.side_effect = lambda mid: _movie(mid, collection=col) if mid == 1 else {}
+        tmdb.get_entity.side_effect = lambda mid, mtype: (_movie(mid, collection=col) if mid == 1 else {})
         tmdb.collection.return_value = {
             "parts": [
                 {"id": 1, "title": "Part 1", "release_date": "2000-01-01"},
