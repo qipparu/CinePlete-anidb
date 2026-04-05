@@ -520,10 +520,10 @@ function renderConfig(){
       <div class="form-section">
         ${sec('Shikimori / MAL <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
         ${check("cfg_shk_enabled", "Enabled", shk.SHIKIMORI_ENABLED)}
-        ${field("cfg_shk_url", "Export URL", shk.SHIKIMORI_EXPORT_URL||"")}
-        ${hint("URL or local path to your Shikimori JSON export. E.g. <code style='color:var(--gold)'>https://shikimori.one/yourname/list_export/animes.json</code>")}
+        ${field("cfg_shk_url", "Export URL/Path", shk.SHIKIMORI_EXPORT_URL||"")}
+        ${hint("Enter the URL or local path to your <b>JSON</b> or <b>XML</b> export file. <br>E.g. <code style='color:var(--gold)'>https://shikimori.one/user/list_export/animes.json</code> or <code style='color:var(--gold)'>/data/mal_export.xml</code>")}
         ${field("cfg_shk_mapping", "Mapping JSON URL", shk.SHIKIMORI_MAPPING_URL||"")}
-        ${hint("Default: v2 mappings from PlexAniBridge-Mappings.")}
+        ${hint("Default: v2 mappings from PlexAniBridge-Mappings. Usually left as is.")}
       </div>
 
       <button class="btn-primary" onclick="saveConfig()">Save Configuration</button>
