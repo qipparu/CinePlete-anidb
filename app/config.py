@@ -15,7 +15,14 @@ DEFAULT_CONFIG = {
     "SERVER": {
         "UI_PORT": 8787,
         "TZ": "Asia/Jerusalem",
-        "MEDIA_SERVER": "plex",   # "plex" or "jellyfin"
+        "MEDIA_SERVER": "plex",   # "plex" | "jellyfin" | "emby"
+    },
+    "EMBY": {
+        "EMBY_URL": "",
+        "EMBY_API_KEY": "",
+        "EMBY_LIBRARY_NAME": "Movies",
+        "EMBY_PAGE_SIZE": 500,
+        "SHORT_MOVIE_LIMIT": 60,
     },
     "JELLYFIN": {
         "JELLYFIN_URL": "",
@@ -154,6 +161,20 @@ def _migrate_libraries(cfg: dict) -> dict:
             "short_movie_limit": int(jf.get("SHORT_MOVIE_LIMIT", 60)),
         })
 
+    emby = cfg.get("EMBY", {})
+    if emby.get("EMBY_URL") or emby.get("EMBY_API_KEY"):
+        libraries.append({
+            "id": "emby-0",
+            "type": "emby",
+            "enabled": media_server == "emby",
+            "label": "Emby",
+            "url": emby.get("EMBY_URL", ""),
+            "api_key": emby.get("EMBY_API_KEY", ""),
+            "library_name": emby.get("EMBY_LIBRARY_NAME", "Movies"),
+            "page_size": int(emby.get("EMBY_PAGE_SIZE", 500)),
+            "short_movie_limit": int(emby.get("SHORT_MOVIE_LIMIT", 60)),
+        })
+
     cfg["LIBRARIES"] = libraries
     return cfg
 
@@ -243,7 +264,7 @@ def config_issues(cfg: dict | None = None) -> list[str]:
     for lib in enabled:
         label    = lib.get("label") or lib.get("type", "Library").capitalize()
         lib_type = lib.get("type", "plex").lower()
-        if lib_type == "jellyfin":
+        if lib_type in ("jellyfin", "emby"):
             missing = []
             if not lib.get("url"):          missing.append("URL")
             if not lib.get("api_key"):      missing.append("API key")

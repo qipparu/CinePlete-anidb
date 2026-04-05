@@ -558,6 +558,8 @@ def build():
         log.info(f"Scanning {lib_type} library: {label}")
         if lib_type == "jellyfin":
             from app.jellyfin_api import scan_movies
+        elif lib_type == "emby":
+            from app.emby_api import scan_movies
         else:
             from app.plex_xml import scan_movies
         return scan_movies(lib)
