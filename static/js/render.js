@@ -3,6 +3,32 @@
    Depends on: api.js, cards.js, mutations.js, filters.js
 ============================================================ */
 
+/* ── Section status helpers (progressive scan) ───────────── */
+
+function _sectionStatus(name) {
+  return DATA?.sections?.[name] ?? "done"
+}
+
+function _renderSectionPending(label) {
+  return `<div class="section-pending">
+    <div class="skeleton-grid">
+      ${Array(6).fill('<div class="skeleton-card"></div>').join("")}
+    </div>
+    <p class="section-pending-label">⏳ ${label} — waiting to start…</p>
+  </div>`
+}
+
+function _renderSectionComputing(msg) {
+  return `<div class="section-pending computing">
+    <div class="skeleton-grid">
+      ${Array(6).fill('<div class="skeleton-card"></div>').join("")}
+    </div>
+    <p class="section-pending-label">
+      <span class="section-spinner">⟳</span> ${msg}
+    </p>
+  </div>`
+}
+
 /* ── Chart registry ──────────────────────────────────────── */
 
 const _charts = {}
@@ -451,6 +477,10 @@ function renderGroupedList({ groups, nameKey, nameIcon, ignoreHandler, emptyMsg,
 /* ── Franchises ──────────────────────────────────────────── */
 
 function renderFranchises(){
+  const st = _sectionStatus("franchises")
+  const c  = document.getElementById("content")
+  if (st === "pending")   { c.innerHTML = _renderSectionPending("Franchises");           return }
+  if (st === "computing") { c.innerHTML = _renderSectionComputing("Analyzing franchises…"); return }
   renderGroupedList({
     groups: DATA.franchises||[], nameKey:"name", nameIcon:"🎬",
     ignoreHandler:"ignoreFranchise", emptyMsg:"No missing franchise movies 🎉"
@@ -460,6 +490,10 @@ function renderFranchises(){
 /* ── Directors ───────────────────────────────────────────── */
 
 function renderDirectors(){
+  const st = _sectionStatus("directors")
+  const c  = document.getElementById("content")
+  if (st === "pending")   { c.innerHTML = _renderSectionPending("Directors");            return }
+  if (st === "computing") { c.innerHTML = _renderSectionComputing("Analyzing directors…"); return }
   renderGroupedList({
     groups: DATA.directors||[], nameKey:"name", nameIcon:"🎬",
     ignoreHandler:"ignoreDirector", emptyMsg:"No missing director films found"
@@ -469,6 +503,10 @@ function renderDirectors(){
 /* ── Actors ──────────────────────────────────────────────── */
 
 function renderActors(){
+  const st = _sectionStatus("actors")
+  const c  = document.getElementById("content")
+  if (st === "pending")   { c.innerHTML = _renderSectionPending("Actors");            return }
+  if (st === "computing") { c.innerHTML = _renderSectionComputing("Analyzing actors…"); return }
   renderGroupedList({
     groups: DATA.actors||[], nameKey:"name", nameIcon:"🎭",
     ignoreHandler:"ignoreActor", emptyMsg:"No actor suggestions found",
@@ -479,7 +517,10 @@ function renderActors(){
 /* ── Classics ────────────────────────────────────────────── */
 
 function renderClassics(){
-  const c    = document.getElementById("content")
+  const st = _sectionStatus("classics")
+  const c  = document.getElementById("content")
+  if (st === "pending")   { c.innerHTML = _renderSectionPending("Classics");           return }
+  if (st === "computing") { c.innerHTML = _renderSectionComputing("Building classics…"); return }
   let list   = applyFilters(DATA.classics||[])
   if (!list.length){ c.innerHTML=emptyStateHTML("No missing classics 🎉"); return }
   const { slice, btn } = _paginate(list, "classics")
@@ -491,7 +532,10 @@ function renderClassics(){
 /* ── Suggestions ─────────────────────────────────────────── */
 
 function renderSuggestions(){
-  const c    = document.getElementById("content")
+  const st = _sectionStatus("suggestions")
+  const c  = document.getElementById("content")
+  if (st === "pending")   { c.innerHTML = _renderSectionPending("Suggestions");              return }
+  if (st === "computing") { c.innerHTML = _renderSectionComputing("Building suggestions…");  return }
   const owned = new Set(DATA.owned_tmdb_ids||[])
   const raw   = (DATA.suggestions||[]).filter(m => !owned.has(m.tmdb))
   const list  = applyFilters(raw)

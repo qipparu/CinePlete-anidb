@@ -99,6 +99,24 @@ def write_results(results: dict):
     os.replace(tmp, RESULTS_FILE)
 
 
+_SECTION_KEYS = ["library", "metadata", "franchises", "directors",
+                 "classics", "suggestions", "actors", "scores"]
+
+
+def _partial_write(acc: dict, sections: dict):
+    """Write accumulated scan results mid-scan with section status map.
+
+    Sets scanning=True so the frontend knows results are partial.
+    Uses the same atomic tmp-rename pattern as write_results().
+    """
+    payload = {**acc, "scanning": True, "sections": dict(sections)}
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = RESULTS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, RESULTS_FILE)
+
+
 def _analyze_collections(plex_ids, tmdb, ignore_franchises, ignore_movies, wishlist_movies):
     """Extract collection/franchise data from the library.
 
@@ -633,83 +651,123 @@ def build():
 
     tmdb = TMDB(tmdb_api_key)
 
+    # Accumulated results dict — sections are filled in progressively
+    acc = {
+        "generated_at":      datetime.utcnow().isoformat() + "Z",
+        "media_server":      plex_stats,
+        "owned_tmdb_ids":    sorted(plex_ids.keys()),
+        "no_tmdb_guid":      no_tmdb_guid,
+        "duplicates":        duplicates,
+        "_ignored_franchises": list(ignore_franchises),
+        "_ignored_directors":  list(ignore_directors),
+        "_ignored_actors":     list(ignore_actors),
+        # sections start empty — filled as each step completes
+        "tmdb_not_found": [],
+        "franchises":     [], "franchise_completion": [],
+        "directors":      [],
+        "classics":       [],
+        "suggestions":    [],
+        "actors":         [],
+        "scores":         {}, "charts": {}, "wishlist":  [],
+    }
+    sections = {k: "pending" for k in _SECTION_KEYS}
+    sections["library"] = "done"
+    _partial_write(acc, sections)
+
     # ---- TMDB VALIDATION --------------------------------------
+    sections["metadata"] = "computing"
     _set_step(2, f"{len(plex_ids)} movies")
+    _partial_write(acc, sections)
     tmdb_not_found = []
     for mid in plex_ids:
         md = tmdb.movie(mid)
         if not md:
             tmdb_not_found.append({"tmdb": mid, "title": plex_ids[mid]})
+    acc["tmdb_not_found"] = tmdb_not_found
+    sections["metadata"] = "done"
+    _partial_write(acc, sections)
 
     # ---- COLLECTIONS ------------------------------------------
+    sections["franchises"] = "computing"
     _set_step(3)
+    _partial_write(acc, sections)
     franchises, franchise_completion = _analyze_collections(
         plex_ids, tmdb, ignore_franchises, ignore_movies, wishlist_movies
     )
+    acc["franchises"]          = franchises
+    acc["franchise_completion"] = franchise_completion
+    sections["franchises"] = "done"
+    _partial_write(acc, sections)
 
     # ---- DIRECTORS --------------------------------------------
+    sections["directors"] = "computing"
     _set_step(4, f"{len(directors_map)} directors")
+    _partial_write(acc, sections)
     directors, director_missing_total = _analyze_directors(
         directors_map, plex_ids, tmdb, ignore_directors, ignore_movies, wishlist_movies
     )
+    acc["directors"] = directors
+    sections["directors"] = "done"
+    _partial_write(acc, sections)
 
     # ---- CLASSICS ---------------------------------------------
+    sections["classics"] = "computing"
+    _partial_write(acc, sections)
     classics = _build_classics(
         tmdb, plex_ids, ignore_movies, wishlist_movies,
         classics_pages, classics_min_votes, classics_min_rating, classics_max_results
     )
+    acc["classics"] = classics
+    sections["classics"] = "done"
+    _partial_write(acc, sections)
 
     # ---- SUGGESTIONS (based on your library) ------------------
+    sections["suggestions"] = "computing"
     _set_step(5, f"{len(plex_ids)} library films")
+    _partial_write(acc, sections)
     suggestions = _build_suggestions(
         plex_ids, tmdb, overrides, ignore_movies, wishlist_movies,
         suggestions_max_results, suggestions_min_score
     )
+    acc["suggestions"] = suggestions
+    sections["suggestions"] = "done"
+    _partial_write(acc, sections)
 
     # ---- ACTORS -----------------------------------------------
+    sections["actors"] = "computing"
     _set_step(6, f"{len(actors_map)} actors")
+    _partial_write(acc, sections)
     actors, actor_missing_total = _analyze_actors(
         actors_map, plex_ids, tmdb, ignore_actors, ignore_movies, wishlist_movies,
         actor_min_votes, actor_max_results_per_actor
     )
+    acc["actors"] = actors
+    sections["actors"] = "done"
+    _partial_write(acc, sections)
 
     # ---- WISHLIST ---------------------------------------------
     wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb)
+    acc["wishlist"] = wishlist
 
     # ---- SCORES -----------------------------------------------
+    sections["scores"] = "computing"
     _set_step(7)
+    _partial_write(acc, sections)
     actor_counts = Counter({k: len(v) for k, v in actors_map.items()})
     top_actors   = [{"name": n, "count": c} for n, c in actor_counts.most_common(40)]
-
     scores = _calculate_scores(
         franchise_completion, directors, director_missing_total,
         classics, classics_max_results
     )
-
-    # ---- RESULTS ----------------------------------------------
-    results = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "media_server": plex_stats,
-        "scores": scores,
-        "charts": {
-            "franchise_completion": franchise_completion[:30],
-            "top_actors":           top_actors,
-        },
-        # Expose ignored lists so the dashboard can filter charts without a second call
-        "_ignored_franchises": list(ignore_franchises),
-        "_ignored_directors":  list(ignore_directors),
-        "_ignored_actors":     list(ignore_actors),
-        "owned_tmdb_ids": sorted(plex_ids.keys()),
-        "no_tmdb_guid":   no_tmdb_guid,
-        "tmdb_not_found": tmdb_not_found,
-        "duplicates":     duplicates,
-        "franchises":     franchises,
-        "directors":      directors,
-        "actors":         actors,
-        "classics":       classics,
-        "suggestions":    suggestions,
-        "wishlist":       wishlist,
+    acc["scores"] = scores
+    acc["charts"] = {
+        "franchise_completion": franchise_completion[:30],
+        "top_actors":           top_actors,
     }
+    sections["scores"] = "done"
+
+    # ---- FINAL WRITE ------------------------------------------
+    results = {**acc, "scanning": False, "sections": sections}
 
     tmdb.flush()
     save_snapshot(plex_ids)

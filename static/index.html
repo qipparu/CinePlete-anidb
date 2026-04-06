@@ -829,6 +829,40 @@
       color: var(--gold);
     }
 
+    /* Progressive scan — section skeleton & spinner */
+    .section-pending {
+      padding: 1.5rem 0;
+    }
+    .skeleton-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: .75rem;
+      margin-bottom: 1rem;
+    }
+    .skeleton-card {
+      height: 195px;
+      border-radius: 10px;
+      background: linear-gradient(90deg,
+        var(--bg2) 25%, var(--bg3) 50%, var(--bg2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    .section-pending-label {
+      font-size: .75rem;
+      color: var(--text3);
+      text-align: center;
+      margin: 0;
+    }
+    .section-spinner {
+      display: inline-block;
+      animation: spin .9s linear infinite;
+      margin-right: .3rem;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
     /* OpenDyslexic font override — applied when body.dyslexic is set */
     body.dyslexic, body.dyslexic * {
       font-family: 'OpenDyslexic', sans-serif !important;
