@@ -179,6 +179,19 @@ function applyStoredTheme() {
   document.getElementById("themeMoonIcon").style.display = t === "light" ? "none" : ""
 }
 
+function toggleDyslexicFont() {
+  const on = document.body.classList.toggle("dyslexic")
+  localStorage.setItem("cp-dyslexic", on ? "1" : "0")
+  document.getElementById("dyslexicBtn")?.classList.toggle("active", on)
+}
+
+function applyStoredDyslexicFont() {
+  if (localStorage.getItem("cp-dyslexic") === "1") {
+    document.body.classList.add("dyslexic")
+    document.getElementById("dyslexicBtn")?.classList.add("active")
+  }
+}
+
 /* ============================================================
    STATE PERSISTENCE
 ============================================================ */
@@ -320,6 +333,7 @@ function isShortcutsOpen(){ return document.getElementById("shortcutsModal")?.cl
 
 async function boot(){
   applyStoredTheme()
+  applyStoredDyslexicFont()
   restoreState()
 
   await loadConfig()

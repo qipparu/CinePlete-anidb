@@ -348,7 +348,11 @@ function renderConfig(){
     <label for="${id}" class="form-label" style="margin:0;cursor:pointer">${label}</label>
   </div>`
 
-  const sec  = t => `<div class="form-section-title">${t}</div>`
+  const svcBadge = (txt, bg, fg = '#fff') =>
+    `<span style="background:${bg};color:${fg};font-size:.58rem;padding:2px 6px;
+      border-radius:4px;font-weight:700;margin-right:.45rem;vertical-align:middle;
+      letter-spacing:.04em">${txt}</span>`
+  const sec  = (t, b = '') => `<div class="form-section-title">${b}${t}</div>`
   const sub  = t => `<p style="font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin:1rem 0 .75rem">${t}</p>`
   const hint = t => `<p style="font-size:.68rem;color:var(--text3);margin-top:-.25rem;margin-bottom:.5rem">${t}</p>`
 
@@ -424,7 +428,7 @@ function renderConfig(){
       </details>
 
       <div class="form-section">
-        ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('TELEGRAM','#2AABEE'))}
         ${check("cfg_tg_enabled", "Enabled", tg.TELEGRAM_ENABLED)}
         ${field("cfg_tg_token",   "Bot Token",  tg.TELEGRAM_BOT_TOKEN||"", "secret")}
         ${field("cfg_tg_chat",    "Chat ID",    tg.TELEGRAM_CHAT_ID  ||"")}
@@ -465,7 +469,7 @@ function renderConfig(){
     <!-- RIGHT COLUMN — Integrations -->
     <div>
       <div class="form-section">
-        ${sec('Radarr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Radarr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('RADARR','#7B2FBE'))}
         ${check("cfg_radarr_enabled", "Enabled", radarr.RADARR_ENABLED)}
         ${field("cfg_radarr_url",  "Radarr URL",     radarr.RADARR_URL     ||"")}
         ${field("cfg_radarr_key",  "Radarr API Key", radarr.RADARR_API_KEY ||"", "secret")}
@@ -475,7 +479,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Radarr 4K <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Radarr 4K <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('RADARR 4K','#7B2FBE'))}
         ${check("cfg_r4k_enabled", "Enabled", r4k.RADARR_4K_ENABLED)}
         ${field("cfg_r4k_url",  "Radarr 4K URL",      r4k.RADARR_4K_URL     ||"")}
         ${field("cfg_r4k_key",  "Radarr 4K API Key",  r4k.RADARR_4K_API_KEY ||"", "secret")}
@@ -486,7 +490,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Overseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Overseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('OVERSEERR','#F59E0B','#000'))}
         ${check("cfg_ovs_enabled", "Enabled", ovs.OVERSEERR_ENABLED)}
         ${field("cfg_ovs_url",   "Overseerr URL",  ovs.OVERSEERR_URL    ||"")}
         ${field("cfg_ovs_key",   "API Key",         ovs.OVERSEERR_API_KEY||"", "secret")}
@@ -494,7 +498,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Jellyseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Jellyseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('JELLYSEERR','#29B4E8'))}
         ${check("cfg_jss_enabled", "Enabled", jss.JELLYSEERR_ENABLED)}
         ${field("cfg_jss_url",   "Jellyseerr URL",  jss.JELLYSEERR_URL    ||"")}
         ${field("cfg_jss_key",   "API Key",          jss.JELLYSEERR_API_KEY||"", "secret")}
@@ -502,14 +506,14 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('WEBHOOK','#6366F1'))}
         ${check("cfg_wh_enabled", "Enabled", wh.WEBHOOK_ENABLED)}
         ${field("cfg_wh_secret",  "Secret (optional)", wh.WEBHOOK_SECRET||"", "secret")}
         ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin/Emby to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
       </div>
 
       <div class="form-section">
-        ${sec('Watchtower <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Watchtower <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('WATCHTOWER','#2496ED'))}
         ${check("cfg_wtch_enabled", "Auto-update enabled", wtch.WATCHTOWER_ENABLED)}
         ${field("cfg_wtch_url",   "Watchtower URL",  wtch.WATCHTOWER_URL        ||"")}
         ${field("cfg_wtch_token", "API Token",        wtch.WATCHTOWER_API_TOKEN  ||"", "secret")}
@@ -520,7 +524,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('FlareSolverr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('FlareSolverr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('FLARESOLVERR','#F48120'))}
         ${field("cfg_flaresolverr_url", "FlareSolverr URL", fsolv.FLARESOLVERR_URL||"")}
         ${hint("e.g. http://flaresolverr:8191 — used to bypass Cloudflare when fetching Letterboxd lists.")}
       </div>
