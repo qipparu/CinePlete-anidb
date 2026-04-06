@@ -175,6 +175,9 @@ function _libEntryHtml(lib, idx) {
         style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
                color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
                padding:.4rem .65rem;box-sizing:border-box"/>
+      <div style="font-size:.68rem;color:var(--text3);margin-top:.2rem">
+        ⚠ Do not use <code>localhost</code> — use your server's LAN IP (e.g. <code>192.168.1.x</code>).
+      </div>
     </div>
     ${credField}
     <div class="form-group" style="margin-bottom:.5rem">
@@ -246,6 +249,19 @@ async function testLibEntry(idx) {
   const lib     = document.getElementById(`lib_${idx}_library`)?.value?.trim()
   const resEl   = document.getElementById(`lib_${idx}_test`)
   if (!resEl) return
+
+  // Warn early when localhost / 127.0.0.1 is used — inside Docker these
+  // point to the CinePlete container itself, not the host machine.
+  if (/localhost|127\.0\.0\.1/.test(url || "")) {
+    resEl.innerHTML = `\u2717 <span style="color:var(--red,#ef4444)">
+      <b>localhost won't work inside Docker.</b><br>
+      Use your server's LAN IP (e.g. <code>http://192.168.1.x:${new URL(url).port||8096}</code>)
+      or <code>http://host.docker.internal:${new URL(url).port||8096}</code> on Docker Desktop.
+    </span>`
+    resEl.style.color = "var(--red,#ef4444)"
+    return
+  }
+
   resEl.textContent = "Testing\u2026"
   resEl.style.color = "var(--text3)"
   const payload = type === "plex"
