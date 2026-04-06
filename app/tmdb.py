@@ -12,8 +12,10 @@ log = get_logger(__name__)
 DATA_DIR   = os.getenv("DATA_DIR", "/data")
 CACHE_FILE = f"{DATA_DIR}/tmdb_cache.json"
 
-# Flush cache to disk every N real HTTP calls so a crash doesn't lose all progress
-FLUSH_EVERY = 50
+# Flush cache to disk every N real HTTP calls so a crash doesn't lose all progress.
+# 200 reduces I/O significantly for large libraries (6000+ movies) while still
+# checkpointing frequently enough that a crash loses at most ~200 TMDB responses.
+FLUSH_EVERY = 200
 
 _RETRY_DELAYS = (2, 4, 8)   # seconds between network-error retries
 MAX_CACHE_ENTRIES = 10_000  # LRU eviction threshold

@@ -281,46 +281,49 @@ def _build_suggestions(plex_ids, tmdb, overrides, ignore_movies, wishlist_movies
     """Build recommendation-based suggestions from library films.
 
     Returns list of suggestion dicts.
+
+    Performance note: rec_scores is persisted in overrides.json so it never
+    needs to be rebuilt from scratch. Only newly added movies contribute new
+    scores. This avoids re-reading all cached recommendation responses on
+    every scan (critical for libraries with thousands of movies).
     """
     rec_fetched_ids = set(overrides.get("rec_fetched_ids", []))
 
-    # Score map: {tmdb_id: recommendation_count}
-    rec_scores: dict = {}
+    # Load persisted score map — only newly added movies will add to it
+    rec_scores: dict = dict(overrides.get("rec_scores", {}))
 
-    # Only fetch recs for IDs not yet in rec_fetched_ids
     ids_to_fetch = [mid for mid in plex_ids if mid not in rec_fetched_ids]
-    newly_fetched = []
 
     log.info(f"Fetching recommendations for {len(ids_to_fetch)} new films "
-             f"({len(rec_fetched_ids)} already cached)")
+             f"({len(rec_fetched_ids)} already scored)")
 
     for mid in ids_to_fetch:
         data = tmdb.recommendations(mid)
         for r in data.get("results", []):
             rid = int(r.get("id", 0))
             if rid:
-                rec_scores[rid] = rec_scores.get(rid, 0) + 1
-        newly_fetched.append(mid)
+                key = str(rid)
+                rec_scores[key] = rec_scores.get(key, 0) + 1
 
-    # Also score from previously fetched IDs using cached responses
-    for mid in rec_fetched_ids:
-        data = tmdb.recommendations(mid)   # will hit cache, no HTTP call
-        for r in data.get("results", []):
-            rid = int(r.get("id", 0))
-            if rid:
-                rec_scores[rid] = rec_scores.get(rid, 0) + 1
-
-    # Persist newly fetched IDs
-    if newly_fetched:
-        overrides["rec_fetched_ids"] = list(rec_fetched_ids | set(newly_fetched))
+    # Persist updated scores and fetched IDs — no full rebuild needed next scan
+    if ids_to_fetch:
+        overrides["rec_scores"]      = rec_scores
+        overrides["rec_fetched_ids"] = list(rec_fetched_ids | set(ids_to_fetch))
         save_json(OVERRIDES_FILE, overrides)
-        log.info(f"rec_fetched_ids updated: {len(overrides['rec_fetched_ids'])} total")
+        log.info(f"rec_scores updated: {len(rec_scores)} candidates, "
+                 f"{len(overrides['rec_fetched_ids'])} films scored")
 
-    # Build suggestions list — exclude library, ignored, unreleased, below min score
+    # Sort by score descending and cap candidates before fetching movie details.
+    # max_results * 20 gives ample headroom even if many top candidates are
+    # already owned, ignored, or unreleased — avoids iterating 50k+ entries.
+    candidate_cap = max(max_results * 20, 500)
+    candidates = sorted(rec_scores.items(), key=lambda x: -x[1])[:candidate_cap]
+
     suggestions = []
     today = date.today().isoformat()
 
-    for rid, score in sorted(rec_scores.items(), key=lambda x: -x[1]):
+    for rid_str, score in candidates:
+        rid = int(rid_str)
         if rid in plex_ids or rid in ignore_movies:
             continue
         if score < min_score:
