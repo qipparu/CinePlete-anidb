@@ -828,6 +828,22 @@
       outline-offset: 1px;
       color: var(--gold);
     }
+    #bmacBtn {
+      width: auto !important;
+      padding: 0 10px !important;
+      gap: 5px;
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-decoration: none;
+      color: var(--text2);
+      white-space: nowrap;
+    }
+    #bmacBtn:hover {
+      background: #FFDD00;
+      border-color: #FFDD00;
+      color: #000;
+    }
 
     /* Progressive scan — section skeleton & spinner */
     .section-pending {
@@ -1213,6 +1229,10 @@
       <div id="topFilters" style="display:none"></div>
       <button id="clipboardBtn" onclick="copyLetterboxdToClipboard()" title="Copy Letterboxd list to clipboard">⎘ Copy</button>
       <button id="exportBtn" onclick="exportCurrent()" title="Export CSV">↓ Export</button>
+      <a class="topbar-btn" id="bmacBtn" href="https://buymeacoffee.com/zj2n4f84pjc" target="_blank" rel="noopener" title="Buy me a coffee ☕">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M20 3H4v10c0 3.31 2.69 6 6 6h4c3.31 0 6-2.69 6-6V3zm-2 2v2h-3V5h3zm-5 0v2H9V5h3zm-5 0v2H5V5h3z"/><path d="M20 7h1c1.1 0 2 .9 2 2v2c0 1.1-.9 2-2 2h-1"/></svg>
+        <span>Coffee</span>
+      </a>
       <button class="topbar-btn" id="searchBtn" onclick="openGlobalSearch()" title="Global search (/)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
       </button>
