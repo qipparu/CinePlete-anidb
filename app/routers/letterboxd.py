@@ -69,9 +69,20 @@ def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None
             timeout=70,
         )
         data = resp.json()
-        if data.get("status") == "ok":
+        status = data.get("status")
+        if status == "ok":
             content = data.get("solution", {}).get("response", "")
-            return content.encode("utf-8") if isinstance(content, str) else content
+            if not content:
+                log.debug(f"FlareSolverr: empty response body for {rss_url}")
+                return None
+            encoded = content.encode("utf-8") if isinstance(content, str) else content
+            log.debug(f"FlareSolverr: got {len(encoded)} bytes for {rss_url}")
+            return encoded
+        else:
+            log.debug(
+                f"FlareSolverr: non-ok status '{status}' for {rss_url} — "
+                f"message: {data.get('message','(none)')}"
+            )
     except Exception as e:
         log.debug(f"FlareSolverr error for {rss_url}: {e}")
     return None
@@ -79,24 +90,44 @@ def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None
 
 def _parse_films_from_html(html_text: str) -> list[dict]:
     """
-    Extract film titles from the HTML description in a Letterboxd lists-feed item.
-    Matches: <a href="https://letterboxd.com/film/slug/">Title</a>
-    Used as fallback when the list RSS itself is blocked (403/404).
+    Extract film titles from Letterboxd HTML. Handles two formats:
+
+    1. RSS description HTML — absolute URLs with inline title text:
+         <a href="https://letterboxd.com/film/slug/">Title</a>
+
+    2. List/watchlist page HTML — data-film-slug attributes on poster divs:
+         <div data-film-slug="the-godfather" ...>
+       Slug is converted to an approximate title ("the godfather") which
+       is accurate enough for TMDB fuzzy search.
     """
     import re
     skip = {"View the full list on Letterboxd", "here", "letterboxd.com"}
-    pattern = re.compile(
+    seen: set = set()
+    results = []
+
+    # Format 1: absolute film URLs (RSS description HTML)
+    abs_pattern = re.compile(
         r'href="https://letterboxd\.com/film/([^/"]+)/"[^>]*>([^<]{1,120})</a>',
         re.IGNORECASE,
     )
-    seen: set = set()
-    results = []
-    for m in pattern.finditer(html_text):
+    for m in abs_pattern.finditer(html_text):
         title = m.group(2).strip()
         slug  = m.group(1)
         if title and title not in skip and slug not in seen:
             seen.add(slug)
             results.append({"title": title})
+
+    if results:
+        return results
+
+    # Format 2: data-film-slug attributes (list/watchlist page HTML)
+    slug_pattern = re.compile(r'data-film-slug="([a-z0-9][a-z0-9-]*)"', re.IGNORECASE)
+    for m in slug_pattern.finditer(html_text):
+        slug = m.group(1)
+        if slug not in seen:
+            seen.add(slug)
+            results.append({"title": slug.replace("-", " ")})
+
     return results
 
 
@@ -154,6 +185,42 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
     try:
         root = ET.fromstring(content)
     except ET.ParseError:
+        # FlareSolverr's Chromium renders RSS/XML as a browser view rather than
+        # returning raw XML — ET.fromstring() fails as a result.
+        # Strategy 1: the rendered HTML might already contain film anchor links.
+        html_text = content.decode("utf-8", errors="replace")
+        fallback = _parse_films_from_html(html_text)
+        if fallback:
+            log.debug(
+                f"Letterboxd: RSS XML parse failed for {rss_url} — "
+                f"extracted {len(fallback)} titles from rendered HTML"
+            )
+            return fallback
+
+        # Strategy 2: fetch the equivalent web page (strip /rss/) via
+        # FlareSolverr — the list page has <a href="/film/slug/"> links
+        # that _parse_films_from_html can reliably extract.
+        if flaresolverr and rss_url.endswith("/rss/"):
+            web_url = rss_url[: -len("rss/")]   # e.g. .../list/my-list/
+            log.debug(
+                f"Letterboxd: rendered HTML had no films — "
+                f"retrying via web page {web_url}"
+            )
+            web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
+            if web_content:
+                web_html = web_content.decode("utf-8", errors="replace")
+                fallback  = _parse_films_from_html(web_html)
+                if fallback:
+                    log.debug(
+                        f"Letterboxd: web page fallback extracted "
+                        f"{len(fallback)} titles from {web_url}"
+                    )
+                    return fallback
+
+        log.warning(
+            f"Letterboxd: all fetch strategies failed for {rss_url} — "
+            "RSS parse error and no film links found in HTML or web page fallback"
+        )
         return []
 
     def local(tag: str) -> str:
