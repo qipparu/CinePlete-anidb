@@ -376,8 +376,9 @@ def _lb_do_refresh() -> None:
             })
             return
 
-        counts:     _Counter      = _Counter()
-        url_status: list[dict]    = []
+        counts:      _Counter           = _Counter()
+        per_url_ids: dict[str, list]   = {}   # url → [tmdb_id, ...] (for fast remove)
+        url_status:  list[dict]        = []
 
         for lb_url in urls:
             raw      = _fetch_letterboxd_rss(lb_url, flaresolverr=flaresolverr)
@@ -391,6 +392,7 @@ def _lb_do_refresh() -> None:
                     counts[tid] += 1
                     seen.add(tid)
                     resolved += 1
+            per_url_ids[lb_url] = list(seen)
             url_status.append({"url": lb_url, "raw": len(raw), "resolved": resolved})
             log.debug(f"Letterboxd refresh: {lb_url} → {len(raw)} raw, {resolved} resolved")
 
@@ -429,6 +431,7 @@ def _lb_do_refresh() -> None:
             "unique":      len(counts),
             "owned_count": owned_count,
             "url_status":  url_status,
+            "per_url_ids": per_url_ids,
             "fetched_at":  _now_iso(),
         })
         log.info(
@@ -538,9 +541,38 @@ def letterboxd_remove_url(payload: dict = Body(...)):
     url  = str(payload.get("url", "")).strip()
     ov   = load_json(OVERRIDES_FILE)
     urls = ov.get("letterboxd_urls", [])
-    if url in urls:
-        urls.remove(url)
-        save_json(OVERRIDES_FILE, ov)
+    if url not in urls:
+        return {"ok": True}
+
+    urls.remove(url)
+    save_json(OVERRIDES_FILE, ov)
+
+    # Update the cache instantly — no refresh needed.
+    # Rebuild the movie list by dropping IDs that were exclusive to the removed URL.
+    from collections import Counter as _Counter
+    cache = load_json(LETTERBOXD_CACHE_FILE)
+    if cache and "per_url_ids" in cache:
+        per_url_ids = cache["per_url_ids"]
+        per_url_ids.pop(url, None)
+
+        # Recount across remaining URLs
+        counts: _Counter = _Counter()
+        for ids in per_url_ids.values():
+            counts.update(ids)
+
+        kept = [m for m in cache.get("movies", []) if m["tmdb"] in counts]
+        # Recalculate score from new counts (may drop if URL was sole contributor)
+        for m in kept:
+            m["score"] = counts[m["tmdb"]]
+        kept.sort(key=lambda m: (-m["score"], -(m["rating"] or 0)))
+
+        cache["movies"]      = kept
+        cache["urls"]        = urls
+        cache["per_url_ids"] = per_url_ids
+        cache["unique"]      = len(counts)
+        save_json(LETTERBOXD_CACHE_FILE, cache)
+        log.debug(f"Letterboxd: removed {url} from cache — {len(kept)} movies remaining")
+
     return {"ok": True}
 
 
