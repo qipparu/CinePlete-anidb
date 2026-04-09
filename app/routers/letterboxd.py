@@ -228,14 +228,28 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
 
         if resp.status_code == 200:
             content = resp.content
-        elif resp.status_code == 403 and flaresolverr:
-            log.debug(f"Letterboxd: 403 on {rss_url}, retrying via FlareSolverr")
-            content = _fetch_via_flaresolverr(rss_url, flaresolverr)
+        elif resp.status_code in (403, 404) and flaresolverr:
+            # 403 = Cloudflare block, 404 = RSS endpoint doesn't exist for this list.
+            # In both cases, fall through to the web page fallback below.
+            log.debug(f"Letterboxd: HTTP {resp.status_code} on {rss_url}, will try list page via FlareSolverr")
         else:
             log.debug(f"Letterboxd: HTTP {resp.status_code} for {rss_url}")
     except requests.exceptions.RequestException:
-        if flaresolverr:
-            content = _fetch_via_flaresolverr(rss_url, flaresolverr)
+        pass
+
+    # If RSS fetch failed or returned no content, try the list web page directly.
+    if not content and flaresolverr and rss_url.endswith("/rss/"):
+        web_url     = rss_url[: -len("rss/")]
+        log.debug(f"Letterboxd: no RSS content — fetching list page {web_url}")
+        web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
+        if web_content:
+            web_html = web_content.decode("utf-8", errors="replace")
+            films    = _fetch_list_page_with_pagination(web_url, web_html, flaresolverr)
+            if films:
+                log.debug(f"Letterboxd: list page extracted {len(films)} titles from {web_url}")
+                return films
+        log.debug(f"Letterboxd: no films found for {rss_url}")
+        return []
 
     if not content:
         return []
@@ -246,34 +260,15 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
 
     if not is_xml:
         # FlareSolverr returned HTML (browser-rendered RSS or Cloudflare page).
-        # Strategy 1: RSS rendered HTML may contain film anchor links.
+        # Try parsing for film anchor links directly in the rendered HTML.
         fallback = _parse_films_from_html(content_str)
         if fallback:
             log.debug(
                 f"Letterboxd: non-XML response for {rss_url} — "
-                f"extracted {len(fallback)} titles from HTML"
+                f"extracted {len(fallback)} titles from rendered HTML"
             )
             return fallback
-
-        # Strategy 2: fetch the list web page and parse with pagination support.
-        if flaresolverr and rss_url.endswith("/rss/"):
-            web_url     = rss_url[: -len("rss/")]
-            log.debug(f"Letterboxd: no films in HTML — fetching list page {web_url}")
-            web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
-            if web_content:
-                web_html = web_content.decode("utf-8", errors="replace")
-                films    = _fetch_list_page_with_pagination(web_url, web_html, flaresolverr)
-                if films:
-                    log.debug(
-                        f"Letterboxd: list page fallback extracted "
-                        f"{len(films)} titles from {web_url}"
-                    )
-                    return films
-
-        log.warning(
-            f"Letterboxd: all fetch strategies failed for {rss_url} — "
-            "no film links found in RSS HTML or list page fallback"
-        )
+        log.warning(f"Letterboxd: no film links found in HTML response for {rss_url}")
         return []
 
     try:
