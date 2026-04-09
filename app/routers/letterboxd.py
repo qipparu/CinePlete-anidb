@@ -7,10 +7,13 @@ Letterboxd tab + watchlist import routes.
   GET  /api/letterboxd/movies
   POST /api/letterboxd/refresh
 """
+import re
 import threading as _threading
+from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
+import defusedxml.ElementTree as ET
 import requests
 from fastapi import APIRouter, Body
 
@@ -52,19 +55,19 @@ def _tmdb_search(api_key: str, title: str, year=None) -> int | None:
         return None
 
 
-def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None:
+def _fetch_via_flaresolverr(url: str, flaresolverr_url: str) -> bytes | None:
     """
     Route a request through FlareSolverr to bypass Cloudflare.
     Returns raw response bytes on success, None on failure.
     """
-    if err := _validate_url_for_fetch(rss_url):
-        log.warning(f"FlareSolverr fetch blocked ({err}): {rss_url}")
+    if err := _validate_url_for_fetch(url):
+        log.warning(f"FlareSolverr fetch blocked ({err}): {url}")
         return None
     base = flaresolverr_url.rstrip("/")
     try:
         resp = requests.post(
             f"{base}/v1",
-            json={"cmd": "request.get", "url": rss_url, "maxTimeout": 60000},
+            json={"cmd": "request.get", "url": url, "maxTimeout": 60000},
             headers={"Content-Type": "application/json"},
             timeout=70,
         )
@@ -73,18 +76,18 @@ def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None
         if status == "ok":
             content = data.get("solution", {}).get("response", "")
             if not content:
-                log.debug(f"FlareSolverr: empty response body for {rss_url}")
+                log.debug(f"FlareSolverr: empty response body for {url}")
                 return None
             encoded = content.encode("utf-8") if isinstance(content, str) else content
-            log.debug(f"FlareSolverr: got {len(encoded)} bytes for {rss_url}")
+            log.debug(f"FlareSolverr: got {len(encoded)} bytes for {url}")
             return encoded
         else:
             log.debug(
-                f"FlareSolverr: non-ok status '{status}' for {rss_url} — "
+                f"FlareSolverr: non-ok status '{status}' for {url} — "
                 f"message: {data.get('message','(none)')}"
             )
     except Exception as e:
-        log.debug(f"FlareSolverr error for {rss_url}: {e}")
+        log.debug(f"FlareSolverr error for {url}: {e}")
     return None
 
 
@@ -103,7 +106,6 @@ def _parse_films_from_html(html_text: str) -> list[dict]:
 
     Formats 2 and 3 convert slug → approximate title for TMDB fuzzy search.
     """
-    import re
     skip = {"View the full list on Letterboxd", "here", "letterboxd.com"}
     seen: set = set()
     results = []
@@ -121,25 +123,24 @@ def _parse_films_from_html(html_text: str) -> list[dict]:
             results.append({"title": title})
 
     if results:
+        log.debug(f"_parse_films_from_html: extracted {len(results)} films (format 1)")
         return results
 
     # Format 2: data-film-slug attributes (poster divs on list/watchlist pages)
-    slug_pattern = re.compile(r'data-film-slug="([^"]+)"', re.IGNORECASE)
-    for m in slug_pattern.finditer(html_text):
+    for m in re.finditer(r'data-film-slug="([^"]+)"', html_text, re.IGNORECASE):
         slug = m.group(1)
         if slug not in seen:
             seen.add(slug)
             results.append({"title": slug.replace("-", " ")})
 
     # Format 3: data-target-link="/film/slug/" (primary poster grid format)
-    target_pattern = re.compile(r'data-target-link="/film/([^/"]+)/"', re.IGNORECASE)
-    for m in target_pattern.finditer(html_text):
+    for m in re.finditer(r'data-target-link="/film/([^/"]+)/"', html_text, re.IGNORECASE):
         slug = m.group(1)
         if slug not in seen:
             seen.add(slug)
             results.append({"title": slug.replace("-", " ")})
 
-    log.debug(f"_parse_films_from_html: extracted {len(results)} films")
+    log.debug(f"_parse_films_from_html: extracted {len(results)} films (format 2/3)")
     return results
 
 
@@ -152,7 +153,6 @@ def _fetch_list_page_with_pagination(
     """
     films = _parse_films_from_html(first_page_html)
 
-    import re
     page_nums = re.findall(r'/page/(\d+)/', first_page_html)
     if not page_nums:
         return films
@@ -195,8 +195,6 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
     link to /list/ pages with no filmTitle/movieId), each linked list's RSS is
     fetched (one level deep, max 10 lists).
     """
-    import defusedxml.ElementTree as ET
-
     path = urlparse(url).path.rstrip("/")
 
     if path.endswith("/rss"):
@@ -229,16 +227,16 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
         if resp.status_code == 200:
             content = resp.content
         elif resp.status_code in (403, 404) and flaresolverr:
-            # 403 = Cloudflare block, 404 = RSS endpoint doesn't exist for this list.
-            # In both cases, fall through to the web page fallback below.
+            # 403 = Cloudflare block, 404 = RSS endpoint doesn't exist.
+            # Fall through to web page fallback below.
             log.debug(f"Letterboxd: HTTP {resp.status_code} on {rss_url}, will try list page via FlareSolverr")
         else:
             log.debug(f"Letterboxd: HTTP {resp.status_code} for {rss_url}")
     except requests.exceptions.RequestException:
         pass
 
-    # If RSS fetch failed or returned no content, try the list web page directly.
-    if not content and flaresolverr and rss_url.endswith("/rss/"):
+    # If RSS fetch failed or blocked, fetch the list web page directly with pagination.
+    if not content and flaresolverr:
         web_url     = rss_url[: -len("rss/")]
         log.debug(f"Letterboxd: no RSS content — fetching list page {web_url}")
         web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
@@ -259,16 +257,22 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
     is_xml = "<rss" in content_str[:500].lower() or "<?xml" in content_str[:500].lower()
 
     if not is_xml:
-        # FlareSolverr returned HTML (browser-rendered RSS or Cloudflare page).
-        # Try parsing for film anchor links directly in the rendered HTML.
+        # 200 response but HTML content (unusual) — try parsing for film links,
+        # then fall back to the list web page if nothing found.
         fallback = _parse_films_from_html(content_str)
         if fallback:
-            log.debug(
-                f"Letterboxd: non-XML response for {rss_url} — "
-                f"extracted {len(fallback)} titles from rendered HTML"
-            )
+            log.debug(f"Letterboxd: non-XML 200 response for {rss_url} — extracted {len(fallback)} titles")
             return fallback
-        log.warning(f"Letterboxd: no film links found in HTML response for {rss_url}")
+        if flaresolverr:
+            web_url     = rss_url[: -len("rss/")]
+            log.debug(f"Letterboxd: no films in HTML 200 — fetching list page {web_url}")
+            web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
+            if web_content:
+                web_html = web_content.decode("utf-8", errors="replace")
+                films    = _fetch_list_page_with_pagination(web_url, web_html, flaresolverr)
+                if films:
+                    return films
+        log.warning(f"Letterboxd: no film links found in response for {rss_url}")
         return []
 
     try:
@@ -358,7 +362,6 @@ def _lb_do_refresh() -> None:
     global _lb_refreshing
     try:
         from app.tmdb import TMDB
-        from collections import Counter as _Counter
 
         cfg          = load_config()
         api_key      = cfg.get("TMDB", {}).get("TMDB_API_KEY", "")
@@ -372,13 +375,21 @@ def _lb_do_refresh() -> None:
         if not urls:
             save_json(LETTERBOXD_CACHE_FILE, {
                 "ok": True, "movies": [], "urls": [], "unique": 0,
-                "owned_count": 0, "url_status": [], "fetched_at": _now_iso(),
+                "owned_count": 0, "url_status": [], "per_url_ids": {},
+                "fetched_at": _now_iso(),
             })
             return
 
-        counts:      _Counter           = _Counter()
-        per_url_ids: dict[str, list]   = {}   # url → [tmdb_id, ...] (for fast remove)
-        url_status:  list[dict]        = []
+        t        = TMDB(api_key)
+        wishlist = set(ov.get("wishlist_movies", []))
+        ignored  = set(ov.get("ignore_movies",  []))
+        owned    = load_snapshot()
+
+        per_url_ids: dict[str, list] = {}   # url → [tmdb_id, ...] (for fast remove)
+        url_status:  list[dict]      = []
+        enriched:    dict[int, dict] = {}   # tmdb_id → movie dict (avoids duplicate TMDB calls)
+        movies:      list[dict]      = []   # final movie list (updated after each URL)
+        owned_count: int             = 0
 
         for lb_url in urls:
             raw      = _fetch_letterboxd_rss(lb_url, flaresolverr=flaresolverr)
@@ -389,51 +400,52 @@ def _lb_do_refresh() -> None:
                 if not tid and item.get("title"):
                     tid = _tmdb_search(api_key, item["title"], item.get("year"))
                 if tid and tid not in seen:
-                    counts[tid] += 1
                     seen.add(tid)
                     resolved += 1
+                    # Enrich new IDs immediately — reuse already-fetched metadata
+                    if tid not in enriched and tid not in owned and tid not in ignored:
+                        md = t.get(f"https://api.themoviedb.org/3/movie/{tid}?api_key={api_key}")
+                        if md and md.get("success") is not False:
+                            enriched[tid] = {
+                                "tmdb":     tid,
+                                "title":    md.get("title"),
+                                "year":     (md.get("release_date") or "")[:4],
+                                "poster":   t.poster_url(md.get("poster_path")),
+                                "rating":   md.get("vote_average", 0),
+                                "wishlist": tid in wishlist,
+                            }
+
             per_url_ids[lb_url] = list(seen)
             url_status.append({"url": lb_url, "raw": len(raw), "resolved": resolved})
             log.debug(f"Letterboxd refresh: {lb_url} → {len(raw)} raw, {resolved} resolved")
 
-        t           = TMDB(api_key)
-        wishlist    = set(ov.get("wishlist_movies", []))
-        ignored     = set(ov.get("ignore_movies",  []))
-        owned       = load_snapshot()
-        movies      = []
-        owned_count = 0
+            # Rebuild movie list from all URLs processed so far and write to cache.
+            # This lets the UI show movies progressively rather than waiting for all URLs.
+            counts = Counter()
+            for ids in per_url_ids.values():
+                counts.update(ids)
 
-        for tid, score in counts.most_common():
-            if tid in ignored:
-                continue
-            if tid in owned:
-                owned_count += 1
-                continue
-            md = t.get(f"https://api.themoviedb.org/3/movie/{tid}?api_key={api_key}")
-            if not md or md.get("success") is False:
-                continue
-            movies.append({
-                "tmdb":     tid,
-                "title":    md.get("title"),
-                "year":     (md.get("release_date") or "")[:4],
-                "poster":   t.poster_url(md.get("poster_path")),
-                "rating":   md.get("vote_average", 0),
-                "score":    score,
-                "wishlist": tid in wishlist,
+            owned_count = sum(1 for tid in counts if tid in owned)
+            movies = []
+            for tid, score in counts.most_common():
+                if tid in ignored or tid in owned:
+                    continue
+                if tid in enriched:
+                    movies.append({**enriched[tid], "score": score})
+
+            movies.sort(key=lambda m: (-m["score"], -(m["rating"] or 0)))
+            save_json(LETTERBOXD_CACHE_FILE, {
+                "ok":          True,
+                "movies":      movies,
+                "urls":        urls,
+                "unique":      len(counts),
+                "owned_count": owned_count,
+                "url_status":  url_status,
+                "per_url_ids": per_url_ids,
+                "fetched_at":  _now_iso(),
             })
+            log.debug(f"Letterboxd: partial cache written — {len(movies)} movies so far")
 
-        movies.sort(key=lambda m: (-m["score"], -(m["rating"] or 0)))
-
-        save_json(LETTERBOXD_CACHE_FILE, {
-            "ok":          True,
-            "movies":      movies,
-            "urls":        urls,
-            "unique":      len(counts),
-            "owned_count": owned_count,
-            "url_status":  url_status,
-            "per_url_ids": per_url_ids,
-            "fetched_at":  _now_iso(),
-        })
         log.info(
             f"Letterboxd refresh complete: {len(movies)} movies "
             f"(owned filtered: {owned_count})"
@@ -499,7 +511,7 @@ def import_watchlist(payload: dict = Body(...)):
             if not api_key:
                 skipped += 1
                 continue
-            tmdb_id = _tmdb_search(api_key, item["title"], item.get("year"))
+            tmdb_id = _tmdb_search(api_key, item.get("title", ""), item.get("year"))
         if not tmdb_id or tmdb_id in existing:
             skipped += 1
             continue
@@ -548,20 +560,17 @@ def letterboxd_remove_url(payload: dict = Body(...)):
     save_json(OVERRIDES_FILE, ov)
 
     # Update the cache instantly — no refresh needed.
-    # Rebuild the movie list by dropping IDs that were exclusive to the removed URL.
-    from collections import Counter as _Counter
+    # Rebuild the movie list by dropping IDs exclusive to the removed URL.
     cache = load_json(LETTERBOXD_CACHE_FILE)
     if cache and "per_url_ids" in cache:
         per_url_ids = cache["per_url_ids"]
         per_url_ids.pop(url, None)
 
-        # Recount across remaining URLs
-        counts: _Counter = _Counter()
+        counts: Counter = Counter()
         for ids in per_url_ids.values():
             counts.update(ids)
 
         kept = [m for m in cache.get("movies", []) if m["tmdb"] in counts]
-        # Recalculate score from new counts (may drop if URL was sole contributor)
         for m in kept:
             m["score"] = counts[m["tmdb"]]
         kept.sort(key=lambda m: (-m["score"], -(m["rating"] or 0)))
