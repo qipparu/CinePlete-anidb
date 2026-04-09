@@ -76,10 +76,7 @@ def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None
                 log.debug(f"FlareSolverr: empty response body for {rss_url}")
                 return None
             encoded = content.encode("utf-8") if isinstance(content, str) else content
-            log.debug(
-                f"FlareSolverr: got {len(encoded)} bytes for {rss_url} — "
-                f"preview: {encoded[:300]!r}"
-            )
+            log.debug(f"FlareSolverr: got {len(encoded)} bytes for {rss_url}")
             return encoded
         else:
             log.debug(
@@ -93,24 +90,44 @@ def _fetch_via_flaresolverr(rss_url: str, flaresolverr_url: str) -> bytes | None
 
 def _parse_films_from_html(html_text: str) -> list[dict]:
     """
-    Extract film titles from the HTML description in a Letterboxd lists-feed item.
-    Matches: <a href="https://letterboxd.com/film/slug/">Title</a>
-    Used as fallback when the list RSS itself is blocked (403/404).
+    Extract film titles from Letterboxd HTML. Handles two formats:
+
+    1. RSS description HTML — absolute URLs with inline title text:
+         <a href="https://letterboxd.com/film/slug/">Title</a>
+
+    2. List/watchlist page HTML — data-film-slug attributes on poster divs:
+         <div data-film-slug="the-godfather" ...>
+       Slug is converted to an approximate title ("the godfather") which
+       is accurate enough for TMDB fuzzy search.
     """
     import re
     skip = {"View the full list on Letterboxd", "here", "letterboxd.com"}
-    pattern = re.compile(
+    seen: set = set()
+    results = []
+
+    # Format 1: absolute film URLs (RSS description HTML)
+    abs_pattern = re.compile(
         r'href="https://letterboxd\.com/film/([^/"]+)/"[^>]*>([^<]{1,120})</a>',
         re.IGNORECASE,
     )
-    seen: set = set()
-    results = []
-    for m in pattern.finditer(html_text):
+    for m in abs_pattern.finditer(html_text):
         title = m.group(2).strip()
         slug  = m.group(1)
         if title and title not in skip and slug not in seen:
             seen.add(slug)
             results.append({"title": title})
+
+    if results:
+        return results
+
+    # Format 2: data-film-slug attributes (list/watchlist page HTML)
+    slug_pattern = re.compile(r'data-film-slug="([a-z0-9][a-z0-9-]*)"', re.IGNORECASE)
+    for m in slug_pattern.finditer(html_text):
+        slug = m.group(1)
+        if slug not in seen:
+            seen.add(slug)
+            results.append({"title": slug.replace("-", " ")})
+
     return results
 
 
@@ -192,10 +209,6 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
             web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
             if web_content:
                 web_html = web_content.decode("utf-8", errors="replace")
-                log.debug(
-                    f"Letterboxd: web page response preview for {web_url}: "
-                    f"{web_html[:600]!r}"
-                )
                 fallback  = _parse_films_from_html(web_html)
                 if fallback:
                     log.debug(
