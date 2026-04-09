@@ -154,21 +154,43 @@ def _fetch_letterboxd_rss(url: str, _depth: int = 0, flaresolverr: str = "") -> 
     try:
         root = ET.fromstring(content)
     except ET.ParseError:
-        # FlareSolverr sometimes returns the Cloudflare HTML page instead of
-        # raw RSS XML. Try extracting film titles from the HTML before giving up.
+        # FlareSolverr's Chromium renders RSS/XML as a browser view rather than
+        # returning raw XML — ET.fromstring() fails as a result.
+        # Strategy 1: the rendered HTML might already contain film anchor links.
         html_text = content.decode("utf-8", errors="replace")
         fallback = _parse_films_from_html(html_text)
         if fallback:
             log.debug(
                 f"Letterboxd: RSS XML parse failed for {rss_url} — "
-                f"extracted {len(fallback)} titles from HTML fallback"
+                f"extracted {len(fallback)} titles from rendered HTML"
             )
-        else:
-            log.warning(
-                f"Letterboxd: RSS XML parse failed for {rss_url} and HTML "
-                "fallback found nothing — check the URL or FlareSolverr response"
+            return fallback
+
+        # Strategy 2: fetch the equivalent web page (strip /rss/) via
+        # FlareSolverr — the list page has <a href="/film/slug/"> links
+        # that _parse_films_from_html can reliably extract.
+        if flaresolverr and rss_url.endswith("/rss/"):
+            web_url = rss_url[: -len("rss/")]   # e.g. .../list/my-list/
+            log.debug(
+                f"Letterboxd: rendered HTML had no films — "
+                f"retrying via web page {web_url}"
             )
-        return fallback
+            web_content = _fetch_via_flaresolverr(web_url, flaresolverr)
+            if web_content:
+                web_html = web_content.decode("utf-8", errors="replace")
+                fallback  = _parse_films_from_html(web_html)
+                if fallback:
+                    log.debug(
+                        f"Letterboxd: web page fallback extracted "
+                        f"{len(fallback)} titles from {web_url}"
+                    )
+                    return fallback
+
+        log.warning(
+            f"Letterboxd: all fetch strategies failed for {rss_url} — "
+            "RSS parse error and no film links found in HTML or web page fallback"
+        )
+        return []
 
     def local(tag: str) -> str:
         return tag.split("}")[-1] if "}" in tag else tag
