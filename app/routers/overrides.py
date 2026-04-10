@@ -30,9 +30,10 @@ def api_ignore(payload: dict = Body(...)):
             return {"ok": False, "error": "Invalid TMDB ID"}
         add_unique(ov["ignore_movies"], tmdb_id)
         ov.setdefault("ignore_movies_meta", {})[str(tmdb_id)] = {
-            "title":  payload.get("title", ""),
-            "year":   payload.get("year"),
-            "poster": payload.get("poster"),
+            "title":     payload.get("title", ""),
+            "year":      payload.get("year"),
+            "poster":    payload.get("poster"),
+            "tmdb_type": payload.get("tmdb_type", "movie"),
         }
     elif kind == "franchise":
         add_unique(ov["ignore_franchises"], str(value))
@@ -81,10 +82,11 @@ def api_ignored():
     for tmdb_id in ids:
         m = meta.get(str(tmdb_id), {})
         movies.append({
-            "tmdb":   tmdb_id,
-            "title":  m.get("title", f"Movie {tmdb_id}"),
-            "year":   m.get("year"),
-            "poster": m.get("poster"),
+            "tmdb":      tmdb_id,
+            "title":     m.get("title", f"Movie {tmdb_id}"),
+            "year":      m.get("year"),
+            "poster":    m.get("poster"),
+            "tmdb_type": m.get("tmdb_type", "movie"),
         })
     return {"ok": True, "movies": movies}
 

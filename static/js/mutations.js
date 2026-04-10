@@ -122,6 +122,7 @@ async function batchIgnoreMovies() {
     await api("/api/ignore", "POST", {
       kind: "movie", value: tmdb,
       title: m.title, year: m.year, poster: m.poster,
+      tmdb_type: m.tmdb_type || "movie"
     })
     _purgeFromData(tmdb)
     document.querySelector(`.pc[data-tmdb="${tmdb}"]`)?.remove()
@@ -156,8 +157,9 @@ async function batchAddToWishlist() {
 async function batchAddToOverseerr() {
   if (!CONFIG?.OVERSEERR?.OVERSEERR_ENABLED) { toast("Overseerr not enabled", "error"); return }
   let ok = 0, fail = 0
-  for (const [tmdb] of _selected) {
-    const res = await api("/api/overseerr/add", "POST", { tmdb })
+  for (const [tmdb, m] of _selected) {
+    const tmdb_type = m.tmdb_type || "movie"
+    const res = await api("/api/overseerr/add", "POST", { tmdb, tmdb_type })
     res.ok ? ok++ : fail++
   }
   toast(`Overseerr: ${ok} requested${fail ? `, ${fail} failed` : ""}`, ok ? "success" : "error")
@@ -167,8 +169,9 @@ async function batchAddToOverseerr() {
 async function batchAddToJellyseerr() {
   if (!CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED) { toast("Jellyseerr not enabled", "error"); return }
   let ok = 0, fail = 0
-  for (const [tmdb] of _selected) {
-    const res = await api("/api/jellyseerr/add", "POST", { tmdb })
+  for (const [tmdb, m] of _selected) {
+    const tmdb_type = m.tmdb_type || "movie"
+    const res = await api("/api/jellyseerr/add", "POST", { tmdb, tmdb_type })
     res.ok ? ok++ : fail++
   }
   toast(`Jellyseerr: ${ok} requested${fail ? `, ${fail} failed` : ""}`, ok ? "success" : "error")
@@ -229,9 +232,14 @@ async function removeWishlist(tmdb, btn){
 
 /* ── Ignore / Unignore ──────────────────────────────────────── */
 
-async function ignoreMovie(tmdb, title, year, poster, btn) {
+async function ignoreMovie(tmdb, title, year, poster, tmdb_type, btn) {
+  if (typeof btn === "undefined") {
+    // backward compatibility if called without tmdb_type
+    btn = tmdb_type
+    tmdb_type = "movie"
+  }
   btn.disabled = true
-  const res = await api("/api/ignore", "POST", { kind: "movie", value: tmdb, title, year, poster })
+  const res = await api("/api/ignore", "POST", { kind: "movie", value: tmdb, title, year, poster, tmdb_type })
   if (res.ok) {
     toast(`"${title}" hidden — won't appear again`, "success")
     _purgeFromData(tmdb)   // keep DATA consistent so tab re-renders don't show it again
@@ -421,9 +429,9 @@ function _makeSeerrStore(key) {
 const overseerrRequested   = _makeSeerrStore("cp-overseerr-requested")
 const jellyseerrRequested  = _makeSeerrStore("cp-jellyseerr-requested")
 
-async function addToOverseerr(tmdb, title, btn){
+async function addToOverseerr(tmdb, title, tmdb_type, btn){
   btn.disabled = true; btn.textContent = "…"
-  const res = await api("/api/overseerr/add","POST",{tmdb,title})
+  const res = await api("/api/overseerr/add","POST",{tmdb,title,tmdb_type})
   if (res.ok){
     overseerrRequested.add(tmdb)
     btn.textContent = "✓ Requested"
@@ -437,9 +445,9 @@ async function addToOverseerr(tmdb, title, btn){
   }
 }
 
-async function addToJellyseerr(tmdb, title, btn){
+async function addToJellyseerr(tmdb, title, tmdb_type, btn){
   btn.disabled = true; btn.textContent = "…"
-  const res = await api("/api/jellyseerr/add","POST",{tmdb,title})
+  const res = await api("/api/jellyseerr/add","POST",{tmdb,title,tmdb_type})
   if (res.ok){
     jellyseerrRequested.add(tmdb)
     btn.textContent = "✓ Requested"

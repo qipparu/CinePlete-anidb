@@ -106,17 +106,18 @@ async function openMovieModal(tmdb, fallback = {}) {
     </div>` : ""
 
   const safeTitle = escHtml((md.title||"").replace(/'/g,"\\'"))
-  const radarrBtn = CONFIG?.RADARR?.RADARR_ENABLED
+  const _mtype = fallback.tmdb_type || "movie"
+  const radarrBtn = (CONFIG?.RADARR?.RADARR_ENABLED && _mtype === 'movie')
     ? `<button class="btn-sm btn-radarr" onclick="addToRadarr(${tmdb},'${safeTitle}',this)">+ Radarr</button>`
     : ""
-  const radarr4kBtn = CONFIG?.RADARR_4K?.RADARR_4K_ENABLED
+  const radarr4kBtn = (CONFIG?.RADARR_4K?.RADARR_4K_ENABLED && _mtype === 'movie')
     ? `<button class="btn-sm btn-radarr" style="opacity:.75" onclick="addToRadarr4k(${tmdb},'${safeTitle}',this)">+ 4K</button>`
     : ""
   const overseerrBtn = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED
-    ? `<button class="btn-sm btn-overseerr" onclick="addToOverseerr(${tmdb},'${safeTitle}',this)">→ Overseerr</button>`
+    ? `<button class="btn-sm btn-overseerr" onclick="addToOverseerr(${tmdb},'${safeTitle}','${_mtype}',this)">→ Overseerr</button>`
     : ""
   const jellyseerrBtn = CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED
-    ? `<button class="btn-sm btn-jellyseerr" onclick="addToJellyseerr(${tmdb},'${safeTitle}',this)">→ Jellyseerr</button>`
+    ? `<button class="btn-sm btn-jellyseerr" onclick="addToJellyseerr(${tmdb},'${safeTitle}','${_mtype}',this)">→ Jellyseerr</button>`
     : ""
   const trailerBtn = md.trailer_key
     ? `<button class="btn-sm btn-trailer" onclick="toggleModalTrailer('${md.trailer_key}')">▶ Trailer</button>`

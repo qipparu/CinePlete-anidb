@@ -268,6 +268,28 @@ class TMDB:
         )
         return self.get(url)
 
+    def tv_recommendations(self, tmdb_tv_id: int) -> dict:
+        """GET /3/tv/{tmdb_tv_id}/recommendations
+        Returns recommended TV shows based on a given show.
+        """
+        url = (
+            f"https://api.themoviedb.org/3/tv/{tmdb_tv_id}/recommendations"
+            f"?api_key={self.api_key}"
+        )
+        return self.get(url)
+
+    def person_combined_credits(self, person_id: int) -> dict:
+        """GET /3/person/{person_id}/combined_credits
+        Returns cast and crew credits for both movies and TV shows.
+        Each entry includes a 'media_type' field ('movie' or 'tv').
+        TV entries use 'name' for title and 'first_air_date' instead of 'release_date'.
+        """
+        url = (
+            f"https://api.themoviedb.org/3/person/{person_id}/combined_credits"
+            f"?api_key={self.api_key}"
+        )
+        return self.get(url)
+
     # ------------------------------------------------
 
     def flush(self):

@@ -245,11 +245,14 @@ def overseerr_add(payload: dict = Body(...)):
     api_key = cfg.get("OVERSEERR_API_KEY", "").strip()
     if not api_key:
         return {"ok": False, "error": "Overseerr API key not configured"}
+    # Use correct media type for TV shows
+    tmdb_type  = str(payload.get("tmdb_type", "movie")).lower()
+    media_type = "tv" if tmdb_type == "tv" else "movie"
     headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
     try:
         r = requests.post(
             f"{cfg['OVERSEERR_URL'].rstrip('/')}/api/v1/request",
-            json={"mediaType": "movie", "mediaId": tmdb_id},
+            json={"mediaType": media_type, "mediaId": tmdb_id},
             headers=headers, timeout=20,
         )
     except requests.exceptions.RequestException as e:
@@ -274,11 +277,14 @@ def jellyseerr_add(payload: dict = Body(...)):
     api_key = cfg.get("JELLYSEERR_API_KEY", "").strip()
     if not api_key:
         return {"ok": False, "error": "Jellyseerr API key not configured"}
+    # Use correct media type for TV shows
+    tmdb_type  = str(payload.get("tmdb_type", "movie")).lower()
+    media_type = "tv" if tmdb_type == "tv" else "movie"
     headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
     try:
         r = requests.post(
             f"{cfg['JELLYSEERR_URL'].rstrip('/')}/api/v1/request",
-            json={"mediaType": "movie", "mediaId": tmdb_id},
+            json={"mediaType": media_type, "mediaId": tmdb_id},
             headers=headers, timeout=20,
         )
     except requests.exceptions.RequestException as e:

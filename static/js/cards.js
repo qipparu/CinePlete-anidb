@@ -9,21 +9,22 @@ function posterCard(m, extraTag = "") {
   const tmdb     = m.tmdb
   const safeName = (m.title || "").replace(/'/g, "\\'").replace(/"/g, "&quot;")
 
-  const radarrBtn = CONFIG?.RADARR?.RADARR_ENABLED
+  const _mtype = m.tmdb_type || 'movie'
+  const radarrBtn = (CONFIG?.RADARR?.RADARR_ENABLED && _mtype === 'movie')
     ? `<button class="btn-sm btn-radarr" onclick="event.stopPropagation();addToRadarr(${tmdb},'${safeName}',this)">+ Radarr</button>`
     : ""
-  const radarr4kBtn = CONFIG?.RADARR_4K?.RADARR_4K_ENABLED
+  const radarr4kBtn = (CONFIG?.RADARR_4K?.RADARR_4K_ENABLED && _mtype === 'movie')
     ? `<button class="btn-sm btn-radarr" style="opacity:.75" onclick="event.stopPropagation();addToRadarr4k(${tmdb},'${safeName}',this)">+ 4K</button>`
     : ""
   const overseerrBtn = CONFIG?.OVERSEERR?.OVERSEERR_ENABLED
     ? (overseerrRequested?.has(tmdb)
         ? `<button class="btn-sm" style="color:var(--green)" disabled>✓ Requested</button>`
-        : `<button class="btn-sm btn-overseerr" onclick="event.stopPropagation();addToOverseerr(${tmdb},'${safeName}',this)">→ OS</button>`)
+        : `<button class="btn-sm btn-overseerr" onclick="event.stopPropagation();addToOverseerr(${tmdb},'${safeName}','${_mtype}',this)">→ OS</button>`)
     : ""
   const jellyseerrBtn = CONFIG?.JELLYSEERR?.JELLYSEERR_ENABLED
     ? (jellyseerrRequested?.has(tmdb)
         ? `<button class="btn-sm" style="color:var(--green)" disabled>✓ Requested</button>`
-        : `<button class="btn-sm btn-jellyseerr" onclick="event.stopPropagation();addToJellyseerr(${tmdb},'${safeName}',this)">→ JS</button>`)
+        : `<button class="btn-sm btn-jellyseerr" onclick="event.stopPropagation();addToJellyseerr(${tmdb},'${safeName}','${_mtype}',this)">→ JS</button>`)
     : ""
 
   // Encode movie data on the button so add/remove toggles can update DATA without extra API calls
@@ -33,7 +34,7 @@ function posterCard(m, extraTag = "") {
     : `<button class="btn-sm btn-wishlist"   data-movie="${movieData}" onclick="event.stopPropagation();addWishlist(${tmdb},this)">☆</button>`
 
   const ignoreBtn = `<button class="btn-sm btn-ignore" title="Don't want this"
-    onclick="event.stopPropagation();ignoreMovie(${tmdb},'${safeName}',${m.year||"null"},'${m.poster||""}',this)">🚫</button>`
+    onclick="event.stopPropagation();ignoreMovie(${tmdb},'${safeName}',${m.year||"null"},'${m.poster||""}','${_mtype}',this)">🚫</button>`
 
   const rating = parseFloat(m.rating || 0).toFixed(1)
 
@@ -56,6 +57,7 @@ function posterCard(m, extraTag = "") {
       <div class="pc-meta">
         <span class="pc-rating">⭐ ${rating}</span>
         ${m.year ? `<span>${m.year}</span>` : ""}
+        ${_mtype === "tv" ? '<span style="color:#3b82f6;font-size:.65rem;border:1px solid #3b82f6;border-radius:3px;padding:0 3px">📺</span>' : ""}
         ${extraTag}
       </div>
     </div>

@@ -7,6 +7,7 @@ let _activeGroupFilter  = ""
 let _activeGenreFilter  = ""
 let _activeRatingFilter = 0   // 0 = no filter
 let _activeYearFilter   = ""  // mirrors yearFilter select, survives tab switches
+let _activeTypeFilter   = ""  // "" = all, "movie" = movies only, "tv" = tv only
 
 /* Navigate to a grouped tab (franchises/directors/actors) with a pre-set group
    filter, bypassing setActiveTab which resets _activeGroupFilter. */
@@ -16,6 +17,7 @@ function navigateToGroupTab(tab, groupName) {
   _activeGenreFilter  = ""
   _activeRatingFilter = 0
   _activeYearFilter   = ""
+  _activeTypeFilter   = ""
   if (typeof _resetPage !== "undefined") _resetPage(tab)
   if (typeof clearSelection !== "undefined") clearSelection()
   if (typeof closeSidebar   !== "undefined") closeSidebar()
@@ -30,6 +32,7 @@ function navigateToSuggestions({ genreId = "", year = "" } = {}) {
   _activeGenreFilter  = genreId
   _activeRatingFilter = 0
   _activeYearFilter   = year
+  _activeTypeFilter   = ""
   if (typeof _resetPage !== "undefined") _resetPage("suggestions")
   if (typeof clearSelection !== "undefined") clearSelection()
   if (typeof closeSidebar   !== "undefined") closeSidebar()
@@ -140,6 +143,8 @@ function applyFilters(list){
     if (year && yearBucket(m.year) !== year) return false
     if (_activeGenreFilter && !(m.genre_ids||[]).includes(parseInt(_activeGenreFilter))) return false
     if (_activeRatingFilter > 0 && (m.rating||0) < _activeRatingFilter) return false
+    if (_activeTypeFilter === "movie" && m.tmdb_type === "tv") return false
+    if (_activeTypeFilter === "tv"    && m.tmdb_type !== "tv") return false
     return true
   })
 
@@ -211,11 +216,15 @@ function updateFilterBar(){
     const prevSort   = document.getElementById("sort")?.value || "popularity"
     const prevGenre  = _activeGenreFilter
     const yearOpts   = [["","All years"],["2020s","2020s"],["2010s","2010s"],["2000s","2000s"],["1990s","1990s"],["older","Older"]]
+    const typeOpts   = [["","All types"],["movie","🎬 Movies"],["tv","📺 TV"]]
 
     bar.innerHTML = `
       <input id="search" placeholder="Search…" value="${prevSearch}"/>
       <select id="yearFilter">
         ${yearOpts.map(([v,l])=>`<option value="${v}"${prevYear===v?" selected":""}>${l}</option>`).join("")}
+      </select>
+      <select id="typeFilter" onchange="_onTypeFilterChange(this.value)">
+        ${typeOpts.map(([v,l])=>`<option value="${v}"${_activeTypeFilter===v?" selected":""}>${l}</option>`).join("")}
       </select>
       <select id="genreFilter">
         <option value="">All genres</option>
@@ -229,6 +238,11 @@ function updateFilterBar(){
 
 function onGenreFilterChange(val) {
   _activeGenreFilter = val
+  render()
+}
+
+function _onTypeFilterChange(val) {
+  _activeTypeFilter = val
   render()
 }
 

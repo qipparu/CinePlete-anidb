@@ -212,11 +212,13 @@ def _analyze_directors(directors_map, plex_ids, plex_types, tmdb, ignore_directo
         if not pid:
             continue
 
-        credits = tmdb.person_credits(pid)
+        # Use combined_credits to include TV director work as well
+        credits = tmdb.person_combined_credits(pid)
         if not credits:
             continue
 
         missing = []
+        seen_mids = set()
         for m in credits.get("crew", []):
             if m.get("job") != "Director":
                 continue
@@ -224,15 +226,20 @@ def _analyze_directors(directors_map, plex_ids, plex_types, tmdb, ignore_directo
             if not mid:
                 continue
             mid = int(mid)
+            if mid in seen_mids:
+                continue
+            seen_mids.add(mid)
             if mid in plex_ids or mid in ignore_movies:
                 continue
-            release = (m.get("release_date") or "")[:10]
+            media_type = m.get("media_type", "movie")
+            release = (m.get("release_date") or m.get("first_air_date") or "")[:10]
             if not release or release > date.today().isoformat():
                 continue
+            title = m.get("title") or m.get("name")
             missing.append({
-                "title":      m.get("title"),
+                "title":      title,
                 "tmdb":       mid,
-                "year":       (m.get("release_date") or "")[:4] or None,
+                "year":       release[:4] if release else None,
                 "poster":     tmdb.poster_url(m.get("poster_path")),
                 "overview":   m.get("overview", ""),
                 "genre_ids":  m.get("genre_ids", []),
@@ -240,7 +247,7 @@ def _analyze_directors(directors_map, plex_ids, plex_types, tmdb, ignore_directo
                 "votes":      m.get("vote_count", 0),
                 "rating":     m.get("vote_average", 0),
                 "wishlist":   mid in wishlist_movies,
-                "tmdb_type":  "movie",
+                "tmdb_type":  media_type,
             })
 
         if missing:
@@ -310,18 +317,37 @@ def _build_suggestions(plex_ids, plex_types, tmdb, overrides, ignore_movies, wis
     scores. This avoids re-reading all cached recommendation responses on
     every scan (critical for libraries with thousands of movies).
     """
-    rec_fetched_ids = set(overrides.get("rec_fetched_ids", []))
+    # Separate tracking: TV show IDs that were previously "fetched" via the
+    # wrong movie endpoint won't be in rec_fetched_ids_tv, so they'll be
+    # correctly re-fetched on the next scan via /3/tv/{id}/recommendations.
+    rec_fetched_ids_movie = set(overrides.get("rec_fetched_ids", []))
+    rec_fetched_ids_tv    = set(overrides.get("rec_fetched_ids_tv", []))
 
-    # Load persisted score map — only newly added movies will add to it
+    # Load persisted score map — only newly added titles will add to it
     rec_scores: dict = dict(overrides.get("rec_scores", {}))
 
-    ids_to_fetch = [mid for mid in plex_ids if mid not in rec_fetched_ids]
+    # Determine which IDs still need fetching (type-aware)
+    ids_to_fetch_movie = [
+        mid for mid in plex_ids
+        if plex_types.get(mid, "movie") != "tv" and mid not in rec_fetched_ids_movie
+    ]
+    ids_to_fetch_tv = [
+        mid for mid in plex_ids
+        if plex_types.get(mid, "movie") == "tv" and mid not in rec_fetched_ids_tv
+    ]
+    ids_to_fetch = ids_to_fetch_movie + ids_to_fetch_tv
 
-    log.info(f"Fetching recommendations for {len(ids_to_fetch)} new films "
-             f"({len(rec_fetched_ids)} already scored)")
+    log.info(f"Fetching recommendations for {len(ids_to_fetch)} new titles "
+             f"(movie:{len(ids_to_fetch_movie)}, tv:{len(ids_to_fetch_tv)}, "
+             f"already done: {len(rec_fetched_ids_movie)+len(rec_fetched_ids_tv)})")
 
     for mid in ids_to_fetch:
-        data = tmdb.recommendations(mid)
+        # Use the correct recommendations endpoint based on media type
+        m_type = plex_types.get(mid, "movie")
+        if m_type == "tv":
+            data = tmdb.tv_recommendations(mid)
+        else:
+            data = tmdb.recommendations(mid)
         for r in data.get("results", []):
             rid = int(r.get("id", 0))
             if rid:
@@ -330,11 +356,13 @@ def _build_suggestions(plex_ids, plex_types, tmdb, overrides, ignore_movies, wis
 
     # Persist updated scores and fetched IDs — no full rebuild needed next scan
     if ids_to_fetch:
-        overrides["rec_scores"]      = rec_scores
-        overrides["rec_fetched_ids"] = list(rec_fetched_ids | set(ids_to_fetch))
+        overrides["rec_scores"]          = rec_scores
+        overrides["rec_fetched_ids"]     = sorted(rec_fetched_ids_movie | set(ids_to_fetch_movie))
+        overrides["rec_fetched_ids_tv"]  = sorted(rec_fetched_ids_tv    | set(ids_to_fetch_tv))
         save_json(OVERRIDES_FILE, overrides)
         log.info(f"rec_scores updated: {len(rec_scores)} candidates, "
-                 f"{len(overrides['rec_fetched_ids'])} films scored")
+                 f"{len(overrides['rec_fetched_ids'])} movies + "
+                 f"{len(overrides['rec_fetched_ids_tv'])} tv shows scored")
 
     # Sort by score descending and cap candidates before fetching movie details.
     # max_results * 20 gives ample headroom even if many top candidates are
@@ -352,18 +380,27 @@ def _build_suggestions(plex_ids, plex_types, tmdb, overrides, ignore_movies, wis
         if score < min_score:
             continue
 
+        # Try movie first; if empty, try TV show
         md = tmdb.movie(rid)
+        r_type = "movie"
+        if not md:
+            md = tmdb.tv_show(rid)
+            r_type = "tv"
         if not md:
             continue
 
-        release = (md.get("release_date") or "")[:10]
+        # Handle both movie (release_date) and TV (first_air_date)
+        release = (md.get("release_date") or md.get("first_air_date") or "")[:10]
         if not release or release > today:
             continue
 
+        title = md.get("title") or md.get("name")
+        year  = release[:4] if release else None
+
         suggestions.append({
-            "title":      md.get("title"),
+            "title":      title,
             "tmdb":       rid,
-            "year":       (md.get("release_date") or "")[:4] or None,
+            "year":       year or None,
             "poster":     tmdb.poster_url(md.get("poster_path")),
             "overview":   md.get("overview", ""),
             "genre_ids":  [g["id"] for g in md.get("genres", [])],
@@ -372,7 +409,7 @@ def _build_suggestions(plex_ids, plex_types, tmdb, overrides, ignore_movies, wis
             "rating":     md.get("vote_average", 0),
             "wishlist":   rid in wishlist_movies,
             "rec_score":  score,
-            "tmdb_type":  "movie",
+            "tmdb_type":  r_type,
         })
 
         if len(suggestions) >= max_results:
@@ -400,7 +437,8 @@ def _analyze_actors(actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignor
 
         pid = sr["results"][0]["id"]
 
-        credits = tmdb.person_credits(pid)
+        # Use combined_credits so TV roles are included alongside movies
+        credits = tmdb.person_combined_credits(pid)
         if not credits:
             continue
 
@@ -420,17 +458,23 @@ def _analyze_actors(actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignor
 
         missing   = []
         have_list = []
+        seen_mids = set()
         for m in films:
             mid = int(m.get("id"))
+            if mid in seen_mids:
+                continue
+            seen_mids.add(mid)
             if mid in ignore_movies:
                 continue
-            release = (m.get("release_date") or "")[:10]
+            media_type = m.get("media_type") or plex_types.get(mid, "movie")
+            release = (m.get("release_date") or m.get("first_air_date") or "")[:10]
             if not release or release > date.today().isoformat():
                 continue
+            title = m.get("title") or m.get("name")
             entry = {
-                "title":      m.get("title"),
+                "title":      title,
                 "tmdb":       mid,
-                "year":       (m.get("release_date") or "")[:4] or None,
+                "year":       release[:4] if release else None,
                 "poster":     tmdb.poster_url(m.get("poster_path")),
                 "overview":   m.get("overview", ""),
                 "genre_ids":  m.get("genre_ids", []),
@@ -438,7 +482,7 @@ def _analyze_actors(actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignor
                 "votes":      m.get("vote_count", 0),
                 "rating":     m.get("vote_average", 0),
                 "wishlist":   mid in wishlist_movies,
-                "tmdb_type":  plex_types.get(mid, "movie"),
+                "tmdb_type":  media_type,
             }
             if mid in plex_ids:
                 if len(have_list) < 10:
@@ -457,10 +501,11 @@ def _analyze_actors(actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignor
     return actors, actor_missing_total
 
 
-def _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb):
-    """Build wishlist, auto-removing movies now in library.
+def _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb, plex_types=None):
+    """Build wishlist, auto-removing movies/shows now in library.
 
-    Returns list of wishlist movie dicts.
+    Returns list of wishlist item dicts.
+    Supports both movie and TV (type resolved via plex_types, falls back to try-both).
     """
     cleaned = False
     for mid in list(wishlist_movies):
@@ -473,15 +518,24 @@ def _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb):
     if cleaned:
         save_json(OVERRIDES_FILE, overrides)
 
+    _ptypes = plex_types or {}
     wishlist = []
     for mid in sorted(wishlist_movies):
-        md = tmdb.movie(mid)
+        # Determine type: prefer library knowledge, then try movie, finally TV
+        m_type = _ptypes.get(mid, "movie")
+        md = tmdb.get_entity(mid, m_type)
+        if not md:
+            # Flip type and retry once
+            m_type = "tv" if m_type == "movie" else "movie"
+            md = tmdb.get_entity(mid, m_type)
         if not md:
             continue
+        title = md.get("title") or md.get("name")
+        year  = (md.get("release_date") or md.get("first_air_date") or "")[:4] or None
         wishlist.append({
             "tmdb":       mid,
-            "title":      md.get("title"),
-            "year":       (md.get("release_date") or "")[:4] or None,
+            "title":      title,
+            "year":       year,
             "poster":     tmdb.poster_url(md.get("poster_path")),
             "overview":   md.get("overview", ""),
             "genre_ids":  [g["id"] for g in md.get("genres", [])],
@@ -489,6 +543,7 @@ def _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb):
             "votes":      md.get("vote_count", 0),
             "rating":     md.get("vote_average", 0),
             "wishlist":   True,
+            "tmdb_type":  m_type,
         })
 
     return wishlist
@@ -1127,7 +1182,7 @@ def build():
     _partial_write(acc, sections)
 
     # ---- WISHLIST ---------------------------------------------
-    wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb)
+    wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb, plex_types)
     acc["wishlist"] = wishlist
 
     # ---- MAL INTEGRATION --------------------------------------
