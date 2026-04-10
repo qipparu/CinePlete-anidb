@@ -56,8 +56,10 @@ def _make_tmdb():
     tmdb.collection.return_value = {}
     tmdb.search_person.return_value = {}
     tmdb.person_credits.return_value = {}
+    tmdb.person_combined_credits.return_value = {}
     tmdb.top_rated.return_value = {}
     tmdb.recommendations.return_value = {}
+    tmdb.tv_recommendations.return_value = {}
     tmdb.get_entity.return_value = {}
     tmdb.poster_url.return_value = None
     return tmdb
@@ -372,8 +374,8 @@ class TestAnalyzeDirectors(unittest.TestCase):
     def test_director_with_missing_films_appears(self):
         tmdb = _make_tmdb()
         tmdb.search_person.return_value = {"results": [{"id": 99}]}
-        tmdb.person_credits.return_value = {
-            "crew": [{"id": 200, "job": "Director", "title": "Missing Film", "release_date": "2000-01-01"}]
+        tmdb.person_combined_credits.return_value = {
+            "crew": [{"id": 200, "job": "Director", "title": "Missing Film", "release_date": "2000-01-01", "media_type": "movie"}]
         }
         tmdb.poster_url.return_value = None
         directors, total = self._run({"Kubrick": [1]}, {1: "Film"}, tmdb)
@@ -384,8 +386,8 @@ class TestAnalyzeDirectors(unittest.TestCase):
     def test_director_with_all_films_owned_not_in_directors(self):
         tmdb = _make_tmdb()
         tmdb.search_person.return_value = {"results": [{"id": 99}]}
-        tmdb.person_credits.return_value = {
-            "crew": [{"id": 1, "job": "Director", "title": "Owned", "release_date": "2000-01-01"}]
+        tmdb.person_combined_credits.return_value = {
+            "crew": [{"id": 1, "job": "Director", "title": "Owned", "release_date": "2000-01-01", "media_type": "movie"}]
         }
         directors, total = self._run({"Kubrick": [1]}, {1: "Owned"}, tmdb)
         assert directors == []
@@ -394,11 +396,11 @@ class TestAnalyzeDirectors(unittest.TestCase):
     def test_returns_correct_director_missing_total(self):
         tmdb = _make_tmdb()
         tmdb.search_person.return_value = {"results": [{"id": 99}]}
-        tmdb.person_credits.return_value = {
+        tmdb.person_combined_credits.return_value = {
             "crew": [
-                {"id": 200, "job": "Director", "title": "Film A", "release_date": "2000-01-01"},
-                {"id": 201, "job": "Director", "title": "Film B", "release_date": "2001-01-01"},
-                {"id": 202, "job": "Actor",    "title": "Film C", "release_date": "2002-01-01"},
+                {"id": 200, "job": "Director", "title": "Film A", "release_date": "2000-01-01", "media_type": "movie"},
+                {"id": 201, "job": "Director", "title": "Film B", "release_date": "2001-01-01", "media_type": "movie"},
+                {"id": 202, "job": "Actor",    "title": "Film C", "release_date": "2002-01-01", "media_type": "movie"},
             ]
         }
         tmdb.poster_url.return_value = None
@@ -581,9 +583,9 @@ class TestAnalyzeActors(unittest.TestCase):
     def test_actor_with_high_vote_missing_films_appears(self):
         tmdb = _make_tmdb()
         tmdb.search_person.return_value = {"results": [{"id": 99}]}
-        tmdb.person_credits.return_value = {
+        tmdb.person_combined_credits.return_value = {
             "cast": [{"id": 200, "title": "Film", "vote_count": 1000, "vote_average": 8.0,
-                      "popularity": 20.0, "release_date": "2000-01-01"}]
+                      "popularity": 20.0, "release_date": "2000-01-01", "media_type": "movie"}]
         }
         tmdb.poster_url.return_value = None
         actors, total = self._run({"Tom Hanks": [1]}, {}, tmdb, min_votes=100)
@@ -594,10 +596,10 @@ class TestAnalyzeActors(unittest.TestCase):
     def test_max_per_actor_limit_respected(self):
         tmdb = _make_tmdb()
         tmdb.search_person.return_value = {"results": [{"id": 99}]}
-        tmdb.person_credits.return_value = {
+        tmdb.person_combined_credits.return_value = {
             "cast": [
                 {"id": i, "title": f"Film {i}", "vote_count": 1000, "vote_average": 8.0,
-                 "popularity": 20.0, "release_date": "2000-01-01"}
+                 "popularity": 20.0, "release_date": "2000-01-01", "media_type": "movie"}
                 for i in range(200, 220)
             ]
         }
@@ -608,12 +610,12 @@ class TestAnalyzeActors(unittest.TestCase):
     def test_returns_correct_actor_missing_total(self):
         tmdb = _make_tmdb()
         tmdb.search_person.return_value = {"results": [{"id": 99}]}
-        tmdb.person_credits.return_value = {
+        tmdb.person_combined_credits.return_value = {
             "cast": [
                 {"id": 200, "title": "Film A", "vote_count": 1000, "vote_average": 8.0,
-                 "popularity": 10.0, "release_date": "2000-01-01"},
+                 "popularity": 10.0, "release_date": "2000-01-01", "media_type": "movie"},
                 {"id": 201, "title": "Film B", "vote_count": 1000, "vote_average": 7.0,
-                 "popularity": 9.0, "release_date": "2001-01-01"},
+                 "popularity": 9.0, "release_date": "2001-01-01", "media_type": "movie"},
             ]
         }
         tmdb.poster_url.return_value = None
@@ -629,7 +631,7 @@ class TestBuildWishlist(unittest.TestCase):
 
     def test_movie_in_library_removed_from_wishlist(self):
         tmdb = _make_tmdb()
-        tmdb.movie.return_value = _movie(1)
+        tmdb.get_entity.return_value = _movie(1)
 
         wishlist_movies = {1, 2}
         plex_ids        = {1: "Already Owned"}
@@ -643,7 +645,7 @@ class TestBuildWishlist(unittest.TestCase):
 
     def test_returns_wishlist_items_not_in_library(self):
         tmdb = _make_tmdb()
-        tmdb.movie.side_effect = lambda mid: _movie(mid, genres=[{"id": 28}])
+        tmdb.get_entity.side_effect = lambda mid, m_type: _movie(mid, genres=[{"id": 28}])
 
         wishlist_movies = {10, 20}
         plex_ids        = {}
@@ -656,7 +658,7 @@ class TestBuildWishlist(unittest.TestCase):
 
     def test_wishlist_item_has_wishlist_true(self):
         tmdb = _make_tmdb()
-        tmdb.movie.return_value = _movie(5, genres=[{"id": 28}])
+        tmdb.get_entity.return_value = _movie(5, genres=[{"id": 28}])
 
         wishlist_movies = {5}
         plex_ids        = {}
