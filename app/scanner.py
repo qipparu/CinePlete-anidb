@@ -1043,11 +1043,8 @@ def build():
             plex_stats[k] = plex_stats.get(k, 0) + v if isinstance(v, int) else v
     plex_stats["anidb_items"] = anidb_items
 
-    # Re-apply the "appeared in 2+ films" filter after merging
-    directors_map = {k: v for k, v in directors_map.items() if len(v) > 1}
-    actors_map    = {k: v for k, v in actors_map.items()    if len(v) > 1}
-
-    log.info(f"Merged: {len(plex_ids)} movies from {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}, {len(duplicates)} duplicates")
+    # Filter for "appeared in 2+ items" is moved later to include TMDB-sourced metadata
+    log.info(f"Merged: {len(plex_ids)} items from {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}, {len(duplicates)} duplicates")
 
     # ---- PROGRESSIVE SCAN CHECK --------------------------------
     snapshot_ids = load_snapshot()
@@ -1119,6 +1116,29 @@ def build():
         md = tmdb.get_entity(mid, m_type)
         if not md:
             tmdb_not_found.append({"tmdb": mid, "title": plex_ids[mid]})
+            continue
+            
+        # Enrich directors/actors from TMDB since media servers often miss them for TV/Anime
+        credits = tmdb.get_credits(mid, m_type)
+        for crew in credits.get("crew", []):
+            if crew.get("job") == "Director":
+                name = crew.get("name")
+                if name:
+                    directors_map[name].add(mid)
+        for cast in credits.get("cast", []):
+            name = cast.get("name")
+            if name:
+                actors_map[name].add(mid)
+
+    # Re-apply the "appeared in 2+ items" filter to include newly found metadata
+    directors_map = {k: v for k, v in directors_map.items() if len(v) > 1}
+    actors_map    = {k: v for k, v in actors_map.items()    if len(v) > 1}
+    
+    # Update stats for display
+    acc["media_server"]["directors_kept"] = len(directors_map)
+    acc["media_server"]["actors_kept"]    = len(actors_map)
+    acc["media_server"]["indexed_tmdb"]   = len([mid for mid in plex_ids if mid not in [x["tmdb"] for x in tmdb_not_found]])
+
     acc["tmdb_not_found"] = tmdb_not_found
     sections["metadata"] = "done"
     _partial_write(acc, sections)

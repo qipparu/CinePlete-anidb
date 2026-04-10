@@ -194,6 +194,9 @@ class AniDBMapper:
                 tvdb_id = int(tvdb_raw)
 
             tmdb_raw = anime.get("tmdbid", "")
+            if not (tmdb_raw and tmdb_raw.isdigit()):
+                tmdb_raw = anime.get("tmdbtv", "")
+
             tmdb_id: Optional[int] = None
             if tmdb_raw and tmdb_raw.isdigit():
                 tmdb_id = int(tmdb_raw)

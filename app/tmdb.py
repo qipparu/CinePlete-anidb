@@ -258,6 +258,15 @@ class TMDB:
             return self.tv_show(tmdb_id)
         return self.movie(tmdb_id)
 
+    def get_credits(self, tmdb_id: int, media_type: str = "movie") -> dict:
+        """Fetch cast and crew credits for an entity from TMDB."""
+        endpoint = "movie" if media_type == "movie" else "tv"
+        url = (
+            f"https://api.themoviedb.org/3/{endpoint}/{tmdb_id}/credits"
+            f"?api_key={self.api_key}"
+        )
+        return self.get(url)
+
     def tv_season_images(self, tmdb_tv_id: int, season_number: int) -> dict:
         """GET /3/tv/{tmdb_tv_id}/season/{season_number}/images
         Returns images for a season.
