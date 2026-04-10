@@ -2,7 +2,7 @@
    filters.js — filter bar, sort helpers, year bucketing
 ============================================================ */
 
-const GROUP_TABS = new Set(["franchises","anime_franchises","directors","actors"])
+const GROUP_TABS = new Set(["franchises","directors","actors"])
 let _activeGroupFilter  = ""
 let _activeGenreFilter  = ""
 let _activeRatingFilter = 0   // 0 = no filter
@@ -274,7 +274,6 @@ function sortSelect(cur){
 
 function getGroupsForTab(tab){
   if (tab==="franchises") return DATA.franchises||[]
-  if (tab==="anime_franchises") return DATA.anime_franchises||[]
   if (tab==="directors")  return DATA.directors ||[]
   if (tab==="actors")     return DATA.actors    ||[]
   return []
