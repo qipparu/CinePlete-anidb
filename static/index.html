@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.cdnfonts.com/css/opendyslexic" rel="stylesheet"/>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -810,6 +811,80 @@
       transition: background .15s, color .15s; flex-shrink: 0;
     }
     .topbar-btn:hover { background: var(--border); color: var(--text); }
+    #dyslexicBtn {
+      width: auto !important;
+      height: auto !important;
+      padding: 4px 10px !important;
+      flex-direction: column;
+      gap: 2px;
+      font-size: .58rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: var(--text2);
+    }
+    #dyslexicBtn.active {
+      outline: 2px solid var(--gold);
+      outline-offset: 1px;
+      color: var(--gold);
+    }
+    #bmacBtn {
+      width: auto !important;
+      padding: 0 10px !important;
+      gap: 5px;
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-decoration: none;
+      color: var(--text2);
+      white-space: nowrap;
+    }
+    #bmacBtn:hover {
+      background: #FFDD00;
+      border-color: #FFDD00;
+      color: #000;
+    }
+
+    /* Progressive scan — section skeleton & spinner */
+    .section-pending {
+      padding: 1.5rem 0;
+    }
+    .skeleton-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+      gap: .75rem;
+      margin-bottom: 1rem;
+    }
+    .skeleton-card {
+      height: 195px;
+      border-radius: 10px;
+      background: linear-gradient(90deg,
+        var(--bg2) 25%, var(--bg3) 50%, var(--bg2) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+    }
+    .section-pending-label {
+      font-size: .75rem;
+      color: var(--text3);
+      text-align: center;
+      margin: 0;
+    }
+    .section-spinner {
+      display: inline-block;
+      animation: spin .9s linear infinite;
+      margin-right: .3rem;
+    }
+    @keyframes shimmer {
+      0%   { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* OpenDyslexic font override — applied when body.dyslexic is set */
+    body.dyslexic, body.dyslexic * {
+      font-family: 'OpenDyslexic', sans-serif !important;
+      letter-spacing: .03em;
+      word-spacing: .1em;
+    }
     #exportBtn {
       font-size: .68rem; padding: 4px 11px; border-radius: 7px;
       border: 1px solid var(--border2); background: var(--bg3);
@@ -1163,8 +1238,38 @@
       <div id="topFilters" style="display:none"></div>
       <button id="clipboardBtn" onclick="copyLetterboxdToClipboard()" title="Copy Letterboxd list to clipboard">⎘ Copy</button>
       <button id="exportBtn" onclick="exportCurrent()" title="Export CSV">↓ Export</button>
+      <a class="topbar-btn" id="bmacBtn" href="https://buymeacoffee.com/zj2n4f84pjc" target="_blank" rel="noopener" title="Buy me a coffee ☕">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M20 3H4v10c0 3.31 2.69 6 6 6h4c3.31 0 6-2.69 6-6V3zm-2 2v2h-3V5h3zm-5 0v2H9V5h3zm-5 0v2H5V5h3z"/><path d="M20 7h1c1.1 0 2 .9 2 2v2c0 1.1-.9 2-2 2h-1"/></svg>
+        <span>Coffee</span>
+      </a>
       <button class="topbar-btn" id="searchBtn" onclick="openGlobalSearch()" title="Global search (/)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
+      <button class="topbar-btn" id="dyslexicBtn" onclick="toggleDyslexicFont()" title="Toggle OpenDyslexic font">
+        <svg width="26" height="26" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5" fill="none"/>
+          <defs>
+            <path id="topArc" d="M 10,50 A 40,40 0 0,1 90,50"/>
+            <path id="botArc" d="M 13,56 A 40,40 0 0,0 87,56"/>
+          </defs>
+          <text font-size="13" font-family="sans-serif" font-weight="700" fill="currentColor" letter-spacing="1.5">
+            <textPath href="#topArc" startOffset="50%" text-anchor="middle">CERTIFIED</textPath>
+          </text>
+          <text font-size="13" font-family="sans-serif" font-weight="700" fill="currentColor" letter-spacing="1.5">
+            <textPath href="#botArc" startOffset="50%" text-anchor="middle">DYSLEXIC</textPath>
+          </text>
+          <text font-size="14" font-family="sans-serif" fill="currentColor" font-weight="700">
+            <tspan x="26" y="45" transform="rotate(-22,26,45)">d</tspan>
+            <tspan x="38" y="38" transform="rotate(16,38,38)">y</tspan>
+            <tspan x="51" y="43" transform="rotate(-11,51,43)">b</tspan>
+            <tspan x="63" y="38" transform="rotate(27,63,38)">p</tspan>
+            <tspan x="28" y="59" transform="rotate(12,28,59)">q</tspan>
+            <tspan x="41" y="56" transform="rotate(-26,41,56)">s</tspan>
+            <tspan x="53" y="60" transform="rotate(19,53,60)">d</tspan>
+            <tspan x="64" y="54" transform="rotate(-14,64,54)">b</tspan>
+          </text>
+        </svg>
+        <span>Dyslexic</span>
       </button>
       <button class="topbar-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle light/dark mode">
         <svg id="themeSunIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>

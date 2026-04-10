@@ -100,6 +100,24 @@ def write_results(results: dict):
     os.replace(tmp, RESULTS_FILE)
 
 
+_SECTION_KEYS = ["library", "metadata", "franchises", "directors",
+                 "classics", "suggestions", "actors", "scores"]
+
+
+def _partial_write(acc: dict, sections: dict):
+    """Write accumulated scan results mid-scan with section status map.
+
+    Sets scanning=True so the frontend knows results are partial.
+    Uses the same atomic tmp-rename pattern as write_results().
+    """
+    payload = {**acc, "scanning": True, "sections": dict(sections)}
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = RESULTS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, RESULTS_FILE)
+
+
 def _analyze_collections(plex_ids, plex_types, tmdb, ignore_franchises, ignore_movies, wishlist_movies):
     """Extract collection/franchise data from the library.
 
@@ -286,46 +304,49 @@ def _build_suggestions(plex_ids, plex_types, tmdb, overrides, ignore_movies, wis
     """Build recommendation-based suggestions from library films.
 
     Returns list of suggestion dicts.
+
+    Performance note: rec_scores is persisted in overrides.json so it never
+    needs to be rebuilt from scratch. Only newly added movies contribute new
+    scores. This avoids re-reading all cached recommendation responses on
+    every scan (critical for libraries with thousands of movies).
     """
     rec_fetched_ids = set(overrides.get("rec_fetched_ids", []))
 
-    # Score map: {tmdb_id: recommendation_count}
-    rec_scores: dict = {}
+    # Load persisted score map — only newly added movies will add to it
+    rec_scores: dict = dict(overrides.get("rec_scores", {}))
 
-    # Only fetch recs for IDs not yet in rec_fetched_ids
     ids_to_fetch = [mid for mid in plex_ids if mid not in rec_fetched_ids]
-    newly_fetched = []
 
     log.info(f"Fetching recommendations for {len(ids_to_fetch)} new films "
-             f"({len(rec_fetched_ids)} already cached)")
+             f"({len(rec_fetched_ids)} already scored)")
 
     for mid in ids_to_fetch:
         data = tmdb.recommendations(mid)
         for r in data.get("results", []):
             rid = int(r.get("id", 0))
             if rid:
-                rec_scores[rid] = rec_scores.get(rid, 0) + 1
-        newly_fetched.append(mid)
+                key = str(rid)
+                rec_scores[key] = rec_scores.get(key, 0) + 1
 
-    # Also score from previously fetched IDs using cached responses
-    for mid in rec_fetched_ids:
-        data = tmdb.recommendations(mid)   # will hit cache, no HTTP call
-        for r in data.get("results", []):
-            rid = int(r.get("id", 0))
-            if rid:
-                rec_scores[rid] = rec_scores.get(rid, 0) + 1
-
-    # Persist newly fetched IDs
-    if newly_fetched:
-        overrides["rec_fetched_ids"] = list(rec_fetched_ids | set(newly_fetched))
+    # Persist updated scores and fetched IDs — no full rebuild needed next scan
+    if ids_to_fetch:
+        overrides["rec_scores"]      = rec_scores
+        overrides["rec_fetched_ids"] = list(rec_fetched_ids | set(ids_to_fetch))
         save_json(OVERRIDES_FILE, overrides)
-        log.info(f"rec_fetched_ids updated: {len(overrides['rec_fetched_ids'])} total")
+        log.info(f"rec_scores updated: {len(rec_scores)} candidates, "
+                 f"{len(overrides['rec_fetched_ids'])} films scored")
 
-    # Build suggestions list — exclude library, ignored, unreleased, below min score
+    # Sort by score descending and cap candidates before fetching movie details.
+    # max_results * 20 gives ample headroom even if many top candidates are
+    # already owned, ignored, or unreleased — avoids iterating 50k+ entries.
+    candidate_cap = max(max_results * 20, 500)
+    candidates = sorted(rec_scores.items(), key=lambda x: -x[1])[:candidate_cap]
+
     suggestions = []
     today = date.today().isoformat()
 
-    for rid, score in sorted(rec_scores.items(), key=lambda x: -x[1]):
+    for rid_str, score in candidates:
+        rid = int(rid_str)
         if rid in plex_ids or rid in ignore_movies:
             continue
         if score < min_score:
@@ -899,6 +920,27 @@ def build():
     _set_step(1, lib_labels,
               label=f"Scanning {len(enabled_libs)} librar{'y' if len(enabled_libs)==1 else 'ies'}")
 
+    # Validate each library's required fields before starting any threads
+    for lib in enabled_libs:
+        lib_type  = lib.get("type", "plex").lower()
+        lib_label = lib.get("label") or lib.get("library_name") or lib_type.capitalize()
+        missing   = []
+        if not lib.get("url", "").strip():
+            missing.append("URL")
+        if lib_type in ("jellyfin", "emby"):
+            if not lib.get("api_key", "").strip():
+                missing.append("API key")
+        else:
+            if not lib.get("token", "").strip():
+                missing.append("token")
+        if not lib.get("library_name", "").strip():
+            missing.append("library name")
+        if missing:
+            raise RuntimeError(
+                f"{lib_label} library is missing: {', '.join(missing)} — "
+                "please complete the library settings in Config."
+            )
+
     def _scan_one(lib):
         lib_type     = lib.get("type", "plex").lower()
         content_type = lib.get("content_type", "movies").lower()   # "movies" | "shows"
@@ -906,6 +948,8 @@ def build():
         log.info(f"Scanning {lib_type} library ({content_type}): {label}")
         if lib_type == "jellyfin":
             from app.jellyfin_api import scan_movies, scan_shows
+        elif lib_type == "emby":
+            from app.emby_api import scan_movies
         else:
             from app.plex_xml import scan_movies, scan_shows
         res = scan_shows(lib) if content_type == "shows" else scan_movies(lib)
@@ -981,50 +1025,110 @@ def build():
 
     tmdb = TMDB(tmdb_api_key)
 
+    # Seed acc with previous results so pending sections show stale data
+    # rather than empty lists while they wait to be recomputed.
+    _prev = read_results() or {}
+    acc = {
+        "generated_at":      datetime.utcnow().isoformat() + "Z",
+        "media_server":      plex_stats,
+        "owned_tmdb_ids":    sorted(plex_ids.keys()),
+        "no_tmdb_guid":      no_tmdb_guid,
+        "duplicates":        duplicates,
+        "_ignored_franchises": list(ignore_franchises),
+        "_ignored_directors":  list(ignore_directors),
+        "_ignored_actors":     list(ignore_actors),
+        # carry previous results — each section overwrites when done
+        "tmdb_not_found": _prev.get("tmdb_not_found", []),
+        "franchises":          _prev.get("franchises", []),
+        "franchise_completion": _prev.get("franchise_completion", []),
+        "directors":           _prev.get("directors", []),
+        "classics":            _prev.get("classics", []),
+        "suggestions":         _prev.get("suggestions", []),
+        "actors":              _prev.get("actors", []),
+        "scores":              _prev.get("scores", {}),
+        "charts":              _prev.get("charts", {}),
+        "wishlist":            _prev.get("wishlist", []),
+    }
+    sections = {k: "pending" for k in _SECTION_KEYS}
+    sections["library"] = "done"
+    _partial_write(acc, sections)
+
     # ---- TMDB VALIDATION --------------------------------------
+    sections["metadata"] = "computing"
     _set_step(2, f"{len(plex_ids)} movies")
+    _partial_write(acc, sections)
     tmdb_not_found = []
     for mid in plex_ids:
         m_type = plex_types.get(mid, "movie")
         md = tmdb.get_entity(mid, m_type)
         if not md:
             tmdb_not_found.append({"tmdb": mid, "title": plex_ids[mid]})
+    acc["tmdb_not_found"] = tmdb_not_found
+    sections["metadata"] = "done"
+    _partial_write(acc, sections)
 
     # ---- COLLECTIONS ------------------------------------------
+    sections["franchises"] = "computing"
     _set_step(3)
+    _partial_write(acc, sections)
     franchises, franchise_completion = _analyze_collections(
         plex_ids, plex_types, tmdb, ignore_franchises, ignore_movies, wishlist_movies
     )
+    acc["franchises"]          = franchises
+    acc["franchise_completion"] = franchise_completion
+    sections["franchises"] = "done"
+    _partial_write(acc, sections)
 
     # ---- DIRECTORS --------------------------------------------
+    sections["directors"] = "computing"
     _set_step(4, f"{len(directors_map)} directors")
+    _partial_write(acc, sections)
     directors, director_missing_total = _analyze_directors(
         directors_map, plex_ids, plex_types, tmdb, ignore_directors, ignore_movies, wishlist_movies,
         director_min_votes, director_max_results
     )
+    acc["directors"] = directors
+    sections["directors"] = "done"
+    _partial_write(acc, sections)
 
     # ---- CLASSICS ---------------------------------------------
+    sections["classics"] = "computing"
+    _partial_write(acc, sections)
     classics = _build_classics(
         tmdb, plex_ids, ignore_movies, wishlist_movies,
         classics_pages, classics_min_votes, classics_min_rating, classics_max_results
     )
+    acc["classics"] = classics
+    sections["classics"] = "done"
+    _partial_write(acc, sections)
 
     # ---- SUGGESTIONS (based on your library) ------------------
+    sections["suggestions"] = "computing"
     _set_step(5, f"{len(plex_ids)} library films")
+    _partial_write(acc, sections)
     suggestions = _build_suggestions(
         plex_ids, plex_types, tmdb, overrides, ignore_movies, wishlist_movies,
         suggestions_max_results, suggestions_min_score
     )
+    acc["suggestions"] = suggestions
+    sections["suggestions"] = "done"
+    _partial_write(acc, sections)
 
     # ---- ACTORS -----------------------------------------------
+    sections["actors"] = "computing"
     _set_step(6, f"{len(actors_map)} actors")
+    _partial_write(acc, sections)
     actors, actor_missing_total = _analyze_actors(
         actors_map, plex_ids, plex_types, tmdb, ignore_actors, ignore_movies, wishlist_movies,
         actor_min_votes, actor_max_results_per_actor
     )
+    acc["actors"] = actors
+    sections["actors"] = "done"
+    _partial_write(acc, sections)
 
     # ---- WISHLIST ---------------------------------------------
     wishlist = _build_wishlist(wishlist_movies, plex_ids, overrides, tmdb)
+    acc["wishlist"] = wishlist
 
     # ---- MAL INTEGRATION --------------------------------------
     mal_completed_anidb = set()
@@ -1116,44 +1220,28 @@ def build():
     franchise_completion.sort(key=lambda x: (x.get("have", 0) / max(1, x.get("total", 1))), reverse=True)
 
     # ---- SCORES -----------------------------------------------
+    sections["scores"] = "computing"
     _set_step(8)
+    _partial_write(acc, sections)
     actor_counts = Counter({k: len(v) for k, v in actors_map.items()})
     top_actors   = [{"name": n, "count": c} for n, c in actor_counts.most_common(40)]
-
     scores = _calculate_scores(
         franchise_completion, directors, director_missing_total,
         classics, classics_max_results
     )
-
-    # ---- RESULTS ----------------------------------------------
-    plex_stats["anidb_items"] = anidb_items
-    results = {
-        "generated_at": datetime.utcnow().isoformat() + "Z",
-        "media_server": plex_stats,
-
-        "scores": scores,
-        "charts": {
-            "franchise_completion": franchise_completion[:30],
-            "top_actors":           top_actors,
-        },
-        # Expose ignored lists so the dashboard can filter charts without a second call
-        "_ignored_franchises": list(ignore_franchises),
-        "_ignored_directors":  list(ignore_directors),
-        "_ignored_actors":     list(ignore_actors),
-        "owned_tmdb_ids": sorted(plex_ids.keys()),
-        "no_tmdb_guid":   no_tmdb_guid,
-        "tmdb_not_found": tmdb_not_found,
-        "duplicates":     duplicates,
-        "franchises":     franchises,
-        "directors":      directors,
-        "actors":         actors,
-        "classics":       classics,
-        "suggestions":    suggestions,
-        "wishlist":       wishlist,
-        "anime":          anime_list,
-        "anime_stats":    anime_stats,
-        "plex_types":     plex_types,
+    acc["scores"] = scores
+    acc["charts"] = {
+        "franchise_completion": franchise_completion[:30],
+        "top_actors":           top_actors,
     }
+    # Local additions
+    acc["anime"]       = anime_list
+    acc["anime_stats"] = anime_stats
+    acc["plex_types"]  = plex_types
+    sections["scores"] = "done"
+
+    # ---- FINAL WRITE ------------------------------------------
+    results = {**acc, "scanning": False, "sections": sections}
 
     tmdb.flush()
     save_snapshot(plex_ids)

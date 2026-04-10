@@ -78,6 +78,16 @@ def _get_plex_movie_count(lib: dict) -> int | None:
 
 def _get_jellyfin_movie_count(lib: dict) -> int | None:
     """Return total movie count for a single Jellyfin library config or None on error."""
+    return _get_emby_like_movie_count(lib, path_prefix="", server_name="Jellyfin")
+
+
+def _get_emby_movie_count(lib: dict) -> int | None:
+    """Return total movie count for a single Emby library config or None on error."""
+    return _get_emby_like_movie_count(lib, path_prefix="/emby", server_name="Emby")
+
+
+def _get_emby_like_movie_count(lib: dict, path_prefix: str, server_name: str) -> int | None:
+    """Shared polling logic for Jellyfin and Emby (identical API, different base path)."""
     try:
         url     = lib.get("url", "").rstrip("/")
         token   = lib.get("api_key", "")
@@ -87,7 +97,7 @@ def _get_jellyfin_movie_count(lib: dict) -> int | None:
             return None
 
         r = requests.get(
-            f"{url}/Library/MediaFolders",
+            f"{url}{path_prefix}/Library/MediaFolders",
             headers={"X-Emby-Token": token},
             timeout=10,
         )
@@ -101,11 +111,11 @@ def _get_jellyfin_movie_count(lib: dict) -> int | None:
                 break
 
         if not lib_id:
-            log.warning(f"Jellyfin library '{library}' not found — check library_name in config")
+            log.warning(f"{server_name} library '{library}' not found — check library_name in config")
             return None
 
         r2 = requests.get(
-            f"{url}/Items",
+            f"{url}{path_prefix}/Items",
             headers={"X-Emby-Token": token},
             params={
                 "ParentId":         lib_id,
@@ -119,7 +129,7 @@ def _get_jellyfin_movie_count(lib: dict) -> int | None:
         return r2.json().get("TotalRecordCount")
 
     except Exception as e:
-        log.debug(f"Jellyfin library poll error: {e}")
+        log.debug(f"{server_name} library poll error: {e}")
         return None
 
 
@@ -137,9 +147,12 @@ def _get_total_movie_count(cfg: dict) -> int | None:
         any_ok = False
         for lib in enabled_libs:
             lib_type = lib.get("type", "plex").lower()
-            count = (_get_jellyfin_movie_count(lib)
-                     if lib_type == "jellyfin"
-                     else _get_plex_movie_count(lib))
+            if lib_type == "jellyfin":
+                count = _get_jellyfin_movie_count(lib)
+            elif lib_type == "emby":
+                count = _get_emby_movie_count(lib)
+            else:
+                count = _get_plex_movie_count(lib)
             if count is not None:
                 total += count
                 any_ok = True
@@ -149,6 +162,7 @@ def _get_total_movie_count(cfg: dict) -> int | None:
     media_server = cfg.get("SERVER", {}).get("MEDIA_SERVER", "plex").lower()
     plex_cfg = cfg.get("PLEX", {})
     jf_cfg   = cfg.get("JELLYFIN", {})
+    emby_cfg = cfg.get("EMBY", {})
     if media_server == "jellyfin":
         legacy_lib = {
             "url": jf_cfg.get("JELLYFIN_URL", ""),
@@ -156,6 +170,13 @@ def _get_total_movie_count(cfg: dict) -> int | None:
             "library_name": jf_cfg.get("JELLYFIN_LIBRARY_NAME", "Movies"),
         }
         return _get_jellyfin_movie_count(legacy_lib)
+    elif media_server == "emby":
+        legacy_lib = {
+            "url": emby_cfg.get("EMBY_URL", ""),
+            "api_key": emby_cfg.get("EMBY_API_KEY", ""),
+            "library_name": emby_cfg.get("EMBY_LIBRARY_NAME", "Movies"),
+        }
+        return _get_emby_movie_count(legacy_lib)
     else:
         legacy_lib = {
             "url": plex_cfg.get("PLEX_URL", ""),

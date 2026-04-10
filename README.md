@@ -1,4 +1,4 @@
-# 🎬 Cineplete — Plex & Jellyfin Movie Audit
+# 🎬 Cineplete — Plex, Jellyfin & Emby Movie Audit
 
 [![Build & Publish Docker](https://github.com/sdblepas/CinePlete/actions/workflows/docker.yml/badge.svg)](https://github.com/sdblepas/CinePlete/actions/workflows/docker.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/sdblepas/cineplete)](https://hub.docker.com/r/sdblepas/cineplete)
@@ -13,6 +13,7 @@
 
 ![Plex](https://img.shields.io/badge/Plex-compatible-orange)
 ![Jellyfin](https://img.shields.io/badge/Jellyfin-compatible-7B2FBE)
+![Emby](https://img.shields.io/badge/Emby-compatible-00A4DC)
 ![Radarr](https://img.shields.io/badge/Radarr-integration-purple)
 ![Overseerr](https://img.shields.io/badge/Overseerr-integration-F59E0B)
 ![Jellyseerr](https://img.shields.io/badge/Jellyseerr-integration-29B4E8)
@@ -28,7 +29,7 @@
 
 Ever wondered **which movies you're missing** from your favorite franchises, directors, or actors?
 
-**Cineplete scans your Plex or Jellyfin library in seconds and shows exactly what's missing.**
+**Cineplete scans your Plex, Jellyfin or Emby library in seconds and shows exactly what's missing.**
 
 ✔ Missing movies from franchises
 ✔ Missing films from directors you collect
@@ -37,13 +38,13 @@ Ever wondered **which movies you're missing** from your favorite franchises, dir
 ✔ Tailor-made suggestions based on your library
 
 All in a **beautiful dashboard with charts and Radarr integration.**
-Supports **both Plex and Jellyfin** — switchable from the Config tab.
+Supports **Plex, Jellyfin and Emby** — switchable from the Config tab.
 
 ![Cineplete Demo](assets/Demo.gif)
 
 ## Overview
 
-**Cineplete** is a self-hosted Docker tool that scans your **Plex or Jellyfin** movie library and identifies:
+**Cineplete** is a self-hosted Docker tool that scans your **Plex, Jellyfin or Emby** movie library and identifies:
 
 - Missing movies from franchises
 - Missing films from directors you already collect
@@ -60,21 +61,26 @@ The tool includes a **web UI dashboard with charts**, a **Logs tab** for diagnos
 
 ## Features
 
-### Media Server Support — Plex & Jellyfin
+### Media Server Support — Plex, Jellyfin & Emby
 
-Cineplete supports two media servers. Switch between them from the **Config tab** — no restart needed.
+Cineplete supports three media servers. Switch between them from the **Config tab** — no restart needed.
 
-| | Plex | Jellyfin |
-|---|---|---|
-| Scanner | Native XML API | Jellyfin HTTP API |
-| Speed | ~2s for 1000 movies | Depends on library size |
-| Credentials | URL + Token | URL + API Key |
-| Library polling | ✔ | ✔ |
-| Test Connection | ✔ | ✔ |
+| | Plex | Jellyfin | Emby |
+|---|---|---|---|
+| Scanner | Native XML API | Jellyfin HTTP API | Emby HTTP API |
+| Speed | ~2s for 1000 movies | Depends on library size | Depends on library size |
+| Credentials | URL + Token | URL + API Key | URL + API Key |
+| Library polling | ✔ | ✔ | ✔ |
+| Test Connection | ✔ | ✔ | ✔ |
 
 **Jellyfin setup:**
 1. In Jellyfin, go to **Dashboard → API Keys** and create a new key for Cineplete.
 2. In Cineplete Config, set `Media Server` to `Jellyfin`, enter the URL, API key, and library name.
+3. Use the **Test Connection** button to verify before saving.
+
+**Emby setup:**
+1. In Emby, go to **Dashboard → API Keys** and create a new key for Cineplete.
+2. In Cineplete Config, add an Emby library entry, enter the URL (e.g. `http://emby:8096`), API key, and library name.
 3. Use the **Test Connection** button to verify before saving.
 
 ---
@@ -99,7 +105,7 @@ Cineplete supports two media servers. Switch between them from the **Config tab*
 **Configuration:**
 
 Libraries are managed from **Config → Libraries**. Each library has:
-- **Type** — `plex` or `jellyfin`
+- **Type** — `plex`, `jellyfin` or `emby`
 - **Enabled** — toggle on/off without deleting credentials
 - **Label** — friendly name (shown in scan progress)
 - **Connection settings** — URL, token/API key, library name
@@ -125,6 +131,16 @@ LIBRARIES:
     url: "http://192.168.1.20:8096"
     api_key: "xxxxxxxxxxxx"
     library_name: "Movies 4K"
+    page_size: 500
+    short_movie_limit: 60
+
+  - id: "emby-main"
+    type: "emby"
+    enabled: true
+    label: "Emby Main"
+    url: "http://192.168.1.30:8096"
+    api_key: "xxxxxxxxxxxx"
+    library_name: "Movies"
     page_size: 500
     short_movie_limit: 60
 ```
@@ -440,13 +456,13 @@ Libraries are configured from **Config → Libraries** in the UI. Each library e
 
 | Key | Required | Description |
 |-----|----------|-------------|
-| `id` | Yes | Unique identifier (e.g. `plex-0`, `jellyfin-4k`) |
-| `type` | Yes | `plex` or `jellyfin` |
+| `id` | Yes | Unique identifier (e.g. `plex-0`, `jellyfin-4k`, `emby-main`) |
+| `type` | Yes | `plex`, `jellyfin` or `emby` |
 | `enabled` | Yes | `true` to scan, `false` to skip |
 | `label` | No | Friendly name shown in scan progress |
 | `url` | Yes | Server URL (e.g. `http://192.168.1.10:32400`) |
 | `token` | Plex only | Plex authentication token |
-| `api_key` | Jellyfin only | Jellyfin API key |
+| `api_key` | Jellyfin / Emby only | Jellyfin or Emby API key |
 | `library_name` | Yes | Name of the movie library |
 | `page_size` | No | API page size (default: 500) |
 | `short_movie_limit` | No | Skip films shorter than N minutes (default: 60) |
@@ -470,6 +486,14 @@ LIBRARIES:
     url: "http://192.168.1.20:8096"
     api_key: "xxxxxxxxxxxx"
     library_name: "Movies 4K"
+
+  - id: "emby-main"
+    type: "emby"
+    enabled: false
+    label: "Emby Main"
+    url: "http://192.168.1.30:8096"
+    api_key: "xxxxxxxxxxxx"
+    library_name: "Movies"
 ```
 
 > **Legacy config (v2.x):** Flat `PLEX_URL`, `PLEX_TOKEN`, `JELLYFIN_URL` settings still work and auto-migrate to `LIBRARIES` format on first load.
@@ -612,7 +636,8 @@ CinePlete/
 │   ├── scanner.py            # 8-step scan engine (threaded)
 │   ├── plex_xml.py           # Plex XML API scanner
 │   ├── jellyfin_api.py       # Jellyfin HTTP API scanner
-│   ├── scheduler.py          # Library auto-poll scheduler (Plex & Jellyfin)
+│   ├── emby_api.py           # Emby HTTP API scanner
+│   ├── scheduler.py          # Library auto-poll scheduler (Plex, Jellyfin & Emby)
 │   ├── tmdb.py               # TMDB API client (cached, key-safe, error logging)
 │   ├── overrides.py          # Ignore/wishlist/rec_fetched_ids helpers
 │   ├── config.py             # Config loader/saver with deep-merge
@@ -668,6 +693,7 @@ All persistent data lives in the mounted `/data` volume and survives container u
 | POST | `/api/wishlist/remove` | Removes from wishlist |
 | POST | `/api/radarr/add` | Sends a movie to Radarr |
 | POST | `/api/jellyfin/test` | Tests Jellyfin connectivity and library access |
+| POST | `/api/emby/test` | Tests Emby connectivity and library access |
 | GET | `/api/logs` | Returns last N lines of cineplete.log |
 | POST | `/api/watchtower/update` | Triggers Watchtower to pull latest CinePlete image |
 | GET | `/api/auth/status` | Returns current auth mode and login state |
@@ -687,7 +713,8 @@ All persistent data lives in the mounted `/data` volume and survives container u
 - Docker (multi-arch: amd64 + arm64)
 - TMDB API v3
 - Plex XML API
-- Jellyfin HTTP API (Emby-compatible)
+- Jellyfin HTTP API
+- Emby HTTP API
 - Chart.js
 - Tailwind CSS (CDN)
 
@@ -696,15 +723,18 @@ All persistent data lives in the mounted `/data` volume and survives container u
 ## Architecture
 
 ```
-Plex Server                        Jellyfin Server
-     │                                    │
-     │ XML API (~2s/1000 movies)          │ HTTP REST API (paginated)
-     ▼                                    ▼
- plex_xml.py                      jellyfin_api.py
-  (TMDB IDs, directors,           (TMDB IDs, directors,
-   actors, duplicates)             actors, top 5/film)
-          \                              /
-           └──────── scan_movies() ─────┘
+Plex Server          Jellyfin Server          Emby Server
+     │                      │                      │
+     │ XML API               │ HTTP REST API         │ HTTP REST API
+     │ (~2s/1000 movies)     │ (paginated)           │ (/emby/ prefix)
+     ▼                      ▼                      ▼
+ plex_xml.py         jellyfin_api.py          emby_api.py
+  (TMDB IDs,          (TMDB IDs,               (TMDB IDs,
+   directors,          directors,               directors,
+   actors,             actors,                  actors,
+   duplicates)         top 5/film)              top 5/film)
+       \                   |                   /
+        └──────────── scan_movies() ──────────┘
                            │
                            ▼
             8-Step Scan Engine — scanner.py (background thread)

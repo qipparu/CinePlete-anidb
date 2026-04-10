@@ -21,8 +21,10 @@ async function loadResults(){
   const data = await api("/api/results")
   if (data.scanning){
     setStatus("Scan in progress…")
+    DATA = data
+    updateBadges()
+    render()          // renders available sections; pending ones show skeletons
     startPolling()
-    renderSkeleton()
     return
   }
   DATA = data
@@ -72,21 +74,31 @@ async function pollScanStatus(){
   let s
   try { s = await api("/api/scan/status") } catch(e){ return }
   renderScanProgress(s)
-  if (!s.running){
-    stopPolling()
-    document.getElementById("scanProgress")?.remove()
-    if (s.error){ toast(`Scan failed: ${s.error}`,"error"); return }
+  if (s.running){
+    // Always fetch and re-render while scan is running so completed
+    // sections appear as soon as they are written — do not gate on
+    // data.scanning which can be false between partial writes
     const data = await api("/api/results")
-    DATA = data
-    const dur = s.last_duration ? ` · took ${fmtDuration(s.last_duration)}` : ""
-    setStatus(`Updated ${fmtDate(DATA.generated_at)}${dur}`)
-    const durEl = document.getElementById("last-duration")
-    if (durEl && s.last_duration) durEl.textContent = `Last scan took ${fmtDuration(s.last_duration)}`
-    updateBadges()
-    toast("Scan complete","success")
-    if (ACTIVE_TAB === "logs") renderLogs()
-    else render()
+    if (data) {
+      DATA = data
+      updateBadges()
+      render()
+    }
+    return
   }
+  stopPolling()
+  document.getElementById("scanProgress")?.remove()
+  if (s.error){ toast(`Scan failed: ${s.error}`,"error"); return }
+  const data = await api("/api/results")
+  DATA = data
+  const dur = s.last_duration ? ` · took ${fmtDuration(s.last_duration)}` : ""
+  setStatus(`Updated ${fmtDate(DATA.generated_at)}${dur}`)
+  const durEl = document.getElementById("last-duration")
+  if (durEl && s.last_duration) durEl.textContent = `Last scan took ${fmtDuration(s.last_duration)}`
+  updateBadges()
+  toast("Scan complete","success")
+  if (ACTIVE_TAB === "logs") renderLogs()
+  else render()
 }
 
 function renderScanProgress(s){

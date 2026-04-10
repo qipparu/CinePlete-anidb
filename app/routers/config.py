@@ -5,6 +5,7 @@ Config + library-test routes.
   GET  /api/config/status
   POST /api/library/test
   POST /api/jellyfin/test
+  POST /api/emby/test
 """
 import requests
 from fastapi import APIRouter, Body
@@ -83,16 +84,18 @@ def api_save_config(payload: dict = Body(...)):
 def library_test(payload: dict = Body(...)):
     lib_type = payload.get("type", "plex").lower()
     try:
-        if lib_type == "jellyfin":
+        if lib_type in ("jellyfin", "emby"):
             import requests as _req
-            url = payload.get("url", "").rstrip("/")
-            key = payload.get("api_key", "")
-            lib = payload.get("library_name", "")
+            url     = payload.get("url", "").rstrip("/")
+            key     = payload.get("api_key", "")
+            lib     = payload.get("library_name", "")
+            prefix  = "/emby" if lib_type == "emby" else ""
+            name    = lib_type.capitalize()
             if not url or not key:
                 return {"ok": False, "error": "URL and API key are required"}
             if urlparse(url).scheme not in ("http", "https"):
                 return {"ok": False, "error": "URL must start with http:// or https://"}
-            r = _req.get(f"{url}/Library/MediaFolders",
+            r = _req.get(f"{url}{prefix}/Library/MediaFolders",
                          headers={"X-Emby-Token": key}, timeout=10)
             r.raise_for_status()
             folders = [i.get("Name","") for i in r.json().get("Items",[])]
@@ -133,20 +136,14 @@ def library_test(payload: dict = Body(...)):
 
 
 # --------------------------------------------------
-# Jellyfin connection test
+# Jellyfin / Emby connection tests
 # --------------------------------------------------
 
-@router.post("/api/jellyfin/test")
-def api_jellyfin_test(payload: dict = Body(...)):
-    """Test Jellyfin connectivity with the provided credentials."""
-    url     = str(payload.get("url",     "")).rstrip("/")
-    token   = str(payload.get("token",   ""))
-    library = str(payload.get("library", "")).strip()
-
+def _test_emby_like(url: str, token: str, library: str, path_prefix: str, server_name: str):
+    """Shared logic for testing Jellyfin and Emby connectivity."""
     if not url or not token:
         return {"ok": False, "error": "URL and API key are required"}
 
-    # SSRF guard: only allow http/https schemes
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
@@ -157,7 +154,7 @@ def api_jellyfin_test(payload: dict = Body(...)):
     headers = {"X-Emby-Token": token}
 
     try:
-        r = requests.get(f"{url}/System/Info", headers=headers, timeout=10)
+        r = requests.get(f"{url}{path_prefix}/System/Info", headers=headers, timeout=10)
         r.raise_for_status()
     except requests.exceptions.ConnectionError:
         return {"ok": False, "error": f"Cannot connect to {url}"}
@@ -172,7 +169,7 @@ def api_jellyfin_test(payload: dict = Body(...)):
         return {"ok": True, "message": "Connected successfully"}
 
     try:
-        r2 = requests.get(f"{url}/Library/MediaFolders", headers=headers, timeout=10)
+        r2 = requests.get(f"{url}{path_prefix}/Library/MediaFolders", headers=headers, timeout=10)
         r2.raise_for_status()
         folders = [i.get("Name", "") for i in r2.json().get("Items", [])]
         match = next((f for f in folders if f.lower() == library.lower()), None)
@@ -181,3 +178,27 @@ def api_jellyfin_test(payload: dict = Body(...)):
         return {"ok": True, "message": f"Connected — library '{match}' found"}
     except Exception as e:
         return {"ok": False, "error": f"Could not list libraries: {e}"}
+
+
+@router.post("/api/jellyfin/test")
+def api_jellyfin_test(payload: dict = Body(...)):
+    """Test Jellyfin connectivity with the provided credentials."""
+    return _test_emby_like(
+        url         = str(payload.get("url",     "")).rstrip("/"),
+        token       = str(payload.get("token",   "")),
+        library     = str(payload.get("library", "")).strip(),
+        path_prefix = "",
+        server_name = "Jellyfin",
+    )
+
+
+@router.post("/api/emby/test")
+def api_emby_test(payload: dict = Body(...)):
+    """Test Emby connectivity with the provided credentials."""
+    return _test_emby_like(
+        url         = str(payload.get("url",     "")).rstrip("/"),
+        token       = str(payload.get("token",   "")),
+        library     = str(payload.get("library", "")).strip(),
+        path_prefix = "/emby",
+        server_name = "Emby",
+    )

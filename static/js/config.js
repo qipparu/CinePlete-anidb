@@ -123,10 +123,20 @@ async function testJellyfinConnection(){
 
 // Build library entry HTML
 function _libEntryHtml(lib, idx) {
-  const isPlex = (lib.type || "plex") === "plex"
+  const libType    = lib.type || "plex"
+  const isPlex     = libType === "plex"
+  const isEmby     = libType === "emby"
+  const serverName = isPlex ? "Plex" : isEmby ? "Emby" : "Jellyfin"
+
   const typeBadge = isPlex
     ? `<span style="background:#e5a00d;color:#000;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">PLEX</span>`
+    : isEmby
+    ? `<span style="background:#00A4DC;color:#fff;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">EMBY</span>`
     : `<span style="background:#7B2FBE;color:#fff;font-size:.62rem;padding:2px 7px;border-radius:4px;font-weight:700">JELLYFIN</span>`
+
+  const urlPlaceholder = isPlex ? "http://plex:32400"
+                       : isEmby ? "http://emby:8096"
+                       : "http://jellyfin:8096"
 
   const credField = isPlex
     ? `<div class="form-group" style="margin-bottom:.5rem">
@@ -139,13 +149,13 @@ function _libEntryHtml(lib, idx) {
        </div>`
 
   return `
-  <div class="lib-entry" data-idx="${idx}" data-type="${lib.type||'plex'}"
+  <div class="lib-entry" data-idx="${idx}" data-type="${libType}"
        style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;
               padding:1rem 1.2rem;margin-bottom:.75rem">
     <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.75rem">
       ${typeBadge}
       <input id="lib_${idx}_label" value="${escHtml(lib.label||"")}"
-        placeholder="${isPlex?"Plex":"Jellyfin"} library label"
+        placeholder="${serverName} library label"
         style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--border2);
                color:var(--text);font-family:'DM Mono',monospace;font-size:.82rem;
                padding:2px 4px;outline:none"/>
@@ -161,17 +171,20 @@ function _libEntryHtml(lib, idx) {
     <div class="form-group" style="margin-bottom:.5rem">
       <label class="form-label" style="font-size:.72rem">URL</label>
       <input id="lib_${idx}_url" type="url" value="${escHtml(lib.url||"")}"
-        placeholder="${isPlex?"http://plex:32400":"http://jellyfin:8096"}"
+        placeholder="${urlPlaceholder}"
         style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
                color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
                padding:.4rem .65rem;box-sizing:border-box"/>
+      <div style="font-size:.68rem;color:var(--text3);margin-top:.2rem">
+        ⚠ Do not use <code>localhost</code> — use your server's LAN IP (e.g. <code>192.168.1.x</code>).
+      </div>
     </div>
     ${credField}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.5rem">
       <div class="form-group" style="margin-bottom:0">
         <label class="form-label" style="font-size:.72rem">Library Name</label>
         <input id="lib_${idx}_library" value="${escHtml(lib.library_name||"")}"
-          placeholder="${isPlex?"Movies":"Movies"}"
+          placeholder="Movies"
           style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
                  color:var(--text);font-family:'DM Mono',monospace;font-size:.78rem;
                  padding:.4rem .65rem;box-sizing:border-box"/>
@@ -188,7 +201,7 @@ function _libEntryHtml(lib, idx) {
       </div>
     </div>
     <div style="font-size:.68rem;color:var(--text3);margin-top:0;margin-bottom:.5rem">
-      Exact name of the library in ${isPlex?"Plex":"Jellyfin"} (e.g. "Movies"). Case-sensitive.
+      Exact name of the library in ${serverName} (e.g. "Movies"). Case-sensitive.
     </div>
     <div style="display:flex;align-items:center;gap:.5rem;margin-top:.25rem">
       <button class="btn-sm" style="font-size:.72rem;padding:5px 14px"
@@ -249,6 +262,19 @@ async function testLibEntry(idx) {
   const lib     = document.getElementById(`lib_${idx}_library`)?.value?.trim()
   const resEl   = document.getElementById(`lib_${idx}_test`)
   if (!resEl) return
+
+  // Warn early when localhost / 127.0.0.1 is used — inside Docker these
+  // point to the CinePlete container itself, not the host machine.
+  if (/localhost|127\.0\.0\.1/.test(url || "")) {
+    resEl.innerHTML = `\u2717 <span style="color:var(--red,#ef4444)">
+      <b>localhost won't work inside Docker.</b><br>
+      Use your server's LAN IP (e.g. <code>http://192.168.1.x:${new URL(url).port||8096}</code>)
+      or <code>http://host.docker.internal:${new URL(url).port||8096}</code> on Docker Desktop.
+    </span>`
+    resEl.style.color = "var(--red,#ef4444)"
+    return
+  }
+
   resEl.textContent = "Testing\u2026"
   resEl.style.color = "var(--text3)"
   const payload = type === "plex"
@@ -283,7 +309,8 @@ function _collectLibraries() {
     if (type === "plex") base.token   = cred
     else                 base.api_key = cred
     return base
-  })
+  // Drop placeholder entries that have never been filled in
+  }).filter(lib => lib.url)
 }
 
 function renderConfig(){
@@ -338,7 +365,11 @@ function renderConfig(){
     <label for="${id}" class="form-label" style="margin:0;cursor:pointer">${label}</label>
   </div>`
 
-  const sec  = t => `<div class="form-section-title">${t}</div>`
+  const svcBadge = (txt, bg, fg = '#fff') =>
+    `<span style="background:${bg};color:${fg};font-size:.58rem;padding:2px 6px;
+      border-radius:4px;font-weight:700;margin-right:.45rem;vertical-align:middle;
+      letter-spacing:.04em">${txt}</span>`
+  const sec  = (t, b = '') => `<div class="form-section-title">${b}${t}</div>`
   const sub  = t => `<p style="font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin:1rem 0 .75rem">${t}</p>`
   const hint = t => `<p style="font-size:.68rem;color:var(--text3);margin-top:-.25rem;margin-bottom:.5rem">${t}</p>`
 
@@ -372,7 +403,7 @@ function renderConfig(){
         <div id="lib-list">
           ${((CONFIG.LIBRARIES||[]).length
             ? CONFIG.LIBRARIES
-            : [{type:"plex",enabled:true,label:"",url:"",token:"",library_name:"Movies",page_size:500,short_movie_limit:60}]
+            : [{type:"plex",enabled:false,label:"",url:"",token:"",library_name:"Movies",page_size:500,short_movie_limit:60}]
           ).map((lib, i) => _libEntryHtml(lib, i)).join("")}
         </div>
         <div style="display:flex;gap:.5rem;margin-top:.5rem">
@@ -380,6 +411,8 @@ function renderConfig(){
             onclick="addLibEntry('plex')">+ Add Plex</button>
           <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(123,47,190,.3);color:#9B5FDE"
             onclick="addLibEntry('jellyfin')">+ Add Jellyfin</button>
+          <button class="btn-sm" style="font-size:.72rem;padding:5px 14px;border-color:rgba(0,164,220,.3);color:#00A4DC"
+            onclick="addLibEntry('emby')">+ Add Emby</button>
         </div>
         <p style="font-size:.7rem;color:var(--text3);margin:.5rem 0 0">
           All enabled libraries are scanned in parallel and merged by TMDB ID.
@@ -416,7 +449,7 @@ function renderConfig(){
       </details>
 
       <div class="form-section">
-        ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Telegram <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('TELEGRAM','#2AABEE'))}
         ${check("cfg_tg_enabled", "Enabled", tg.TELEGRAM_ENABLED)}
         ${field("cfg_tg_token",   "Bot Token",  tg.TELEGRAM_BOT_TOKEN||"", "secret")}
         ${field("cfg_tg_chat",    "Chat ID",    tg.TELEGRAM_CHAT_ID  ||"")}
@@ -457,7 +490,7 @@ function renderConfig(){
     <!-- RIGHT COLUMN — Integrations -->
     <div>
       <div class="form-section">
-        ${sec('Radarr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Radarr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('RADARR','#7B2FBE'))}
         ${check("cfg_radarr_enabled", "Enabled", radarr.RADARR_ENABLED)}
         ${field("cfg_radarr_url",  "Radarr URL",     radarr.RADARR_URL     ||"")}
         ${field("cfg_radarr_key",  "Radarr API Key", radarr.RADARR_API_KEY ||"", "secret")}
@@ -467,7 +500,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Radarr 4K <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Radarr 4K <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('RADARR 4K','#7B2FBE'))}
         ${check("cfg_r4k_enabled", "Enabled", r4k.RADARR_4K_ENABLED)}
         ${field("cfg_r4k_url",  "Radarr 4K URL",      r4k.RADARR_4K_URL     ||"")}
         ${field("cfg_r4k_key",  "Radarr 4K API Key",  r4k.RADARR_4K_API_KEY ||"", "secret")}
@@ -478,7 +511,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Overseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Overseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('OVERSEERR','#F59E0B','#000'))}
         ${check("cfg_ovs_enabled", "Enabled", ovs.OVERSEERR_ENABLED)}
         ${field("cfg_ovs_url",   "Overseerr URL",  ovs.OVERSEERR_URL    ||"")}
         ${field("cfg_ovs_key",   "API Key",         ovs.OVERSEERR_API_KEY||"", "secret")}
@@ -486,7 +519,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Jellyseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Jellyseerr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('JELLYSEERR','#29B4E8'))}
         ${check("cfg_jss_enabled", "Enabled", jss.JELLYSEERR_ENABLED)}
         ${field("cfg_jss_url",   "Jellyseerr URL",  jss.JELLYSEERR_URL    ||"")}
         ${field("cfg_jss_key",   "API Key",          jss.JELLYSEERR_API_KEY||"", "secret")}
@@ -494,14 +527,14 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Webhook <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('WEBHOOK','#6366F1'))}
         ${check("cfg_wh_enabled", "Enabled", wh.WEBHOOK_ENABLED)}
         ${field("cfg_wh_secret",  "Secret (optional)", wh.WEBHOOK_SECRET||"", "secret")}
-        ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
+        ${hint("POST to <code style='color:var(--gold)'>/api/webhook?secret=…</code> from Plex/Jellyfin/Emby to trigger a rescan. Leave secret blank to allow unauthenticated calls.")}
       </div>
 
       <div class="form-section">
-        ${sec('Watchtower <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('Watchtower <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('WATCHTOWER','#2496ED'))}
         ${check("cfg_wtch_enabled", "Auto-update enabled", wtch.WATCHTOWER_ENABLED)}
         ${field("cfg_wtch_url",   "Watchtower URL",  wtch.WATCHTOWER_URL        ||"")}
         ${field("cfg_wtch_token", "API Token",        wtch.WATCHTOWER_API_TOKEN  ||"", "secret")}
@@ -512,7 +545,7 @@ function renderConfig(){
       </div>
 
       <div class="form-section">
-        ${sec('FlareSolverr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>')}
+        ${sec('FlareSolverr <span style="font-size:.75rem;font-weight:400;color:var(--text3)">(optional)</span>', svcBadge('FLARESOLVERR','#F48120'))}
         ${field("cfg_flaresolverr_url", "FlareSolverr URL", fsolv.FLARESOLVERR_URL||"")}
         ${hint("e.g. http://flaresolverr:8191 — used to bypass Cloudflare when fetching Letterboxd lists.")}
       </div>
@@ -568,6 +601,15 @@ async function saveConfig(){
         JELLYFIN_LIBRARY_NAME: j.library_name,
         JELLYFIN_PAGE_SIZE: j.page_size || 500, SHORT_MOVIE_LIMIT: j.short_movie_limit || 60,
       } : (CONFIG?.JELLYFIN || {})
+    })(),
+    EMBY: (() => {
+      const libs = _collectLibraries()
+      const e = libs.find(l => l.type === "emby")
+      return e ? {
+        EMBY_URL: e.url, EMBY_API_KEY: e.api_key,
+        EMBY_LIBRARY_NAME: e.library_name,
+        EMBY_PAGE_SIZE: e.page_size || 500, SHORT_MOVIE_LIMIT: e.short_movie_limit || 60,
+      } : (CONFIG?.EMBY || {})
     })(),
     TMDB:{
       TMDB_API_KEY: v("cfg_tmdb_key"),

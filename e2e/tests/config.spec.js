@@ -20,10 +20,11 @@ test.describe('Settings page', () => {
     await expect(field).toHaveAttribute('type', 'password')
   })
 
-  test('Libraries section is present with Add Plex and Add Jellyfin buttons', async ({ page }) => {
+  test('Libraries section is present with Add Plex, Add Jellyfin and Add Emby buttons', async ({ page }) => {
     await expect(page.locator('#libraries-section')).toBeVisible()
     await expect(page.locator('button', { hasText: '+ Add Plex' })).toBeVisible()
     await expect(page.locator('button', { hasText: '+ Add Jellyfin' })).toBeVisible()
+    await expect(page.locator('button', { hasText: '+ Add Emby' })).toBeVisible()
   })
 
   test('Save Configuration button is present and enabled', async ({ page }) => {
@@ -42,6 +43,17 @@ test.describe('Settings page', () => {
     await page.locator('button', { hasText: '+ Add Jellyfin' }).click()
     await expect(page.locator('[id^="lib_"][id$="_url"]').first()).toBeVisible()
     await expect(page.locator('[id^="lib_"][id$="_library"]').first()).toBeVisible()
+  })
+
+  test('Add Emby entry renders EMBY badge, URL and library name fields', async ({ page }) => {
+    await page.locator('button', { hasText: '+ Add Emby' }).click()
+    const entry = page.locator('.lib-entry[data-type="emby"]')
+    await expect(entry).toBeVisible()
+    await expect(entry.locator('span', { hasText: 'EMBY' })).toBeVisible()
+    await expect(entry.locator('[id$="_url"]')).toBeVisible()
+    await expect(entry.locator('[id$="_library"]')).toBeVisible()
+    // URL placeholder should reference emby default port
+    await expect(entry.locator('[id$="_url"]')).toHaveAttribute('placeholder', /emby:8096/)
   })
 
   test('config roundtrip: save then reload preserves values', async ({ page, request }) => {
