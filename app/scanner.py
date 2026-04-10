@@ -1041,6 +1041,7 @@ def build():
         duplicates.extend(stats.pop("duplicates", []))
         for k, v in stats.items():
             plex_stats[k] = plex_stats.get(k, 0) + v if isinstance(v, int) else v
+    plex_stats["anidb_items"] = anidb_items
 
     # Re-apply the "appeared in 2+ films" filter after merging
     directors_map = {k: v for k, v in directors_map.items() if len(v) > 1}
